@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>content_intent_alpha 技术方案</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background: #f8f9fa;
+    color: #2c2c2a;
+    line-height: 1.8;
+    padding: 40px 20px;
+  }
+  .container { max-width: 860px; margin: 0 auto; background: #fff; border-radius: 12px; padding: 48px 56px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+  h1 { font-size: 28px; font-weight: 600; margin-bottom: 8px; color: #1a1a1a; }
+  .subtitle { font-size: 14px; color: #888; margin-bottom: 40px; padding-bottom: 24px; border-bottom: 1px solid #eee; }
+  h2 { font-size: 20px; font-weight: 600; margin: 36px 0 16px; color: #1a1a1a; padding-left: 12px; border-left: 3px solid #185FA5; }
+  h3 { font-size: 16px; font-weight: 600; margin: 24px 0 12px; color: #333; }
+  p { font-size: 14px; margin-bottom: 12px; color: #444; }
+  ul, ol { margin: 8px 0 16px 20px; }
+  li { font-size: 14px; margin-bottom: 6px; color: #444; }
+  table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 13px; }
+  th { background: #f0f4f8; padding: 10px 14px; text-align: left; font-weight: 600; color: #1a1a1a; border-bottom: 2px solid #d0d8e0; }
+  td { padding: 10px 14px; border-bottom: 1px solid #eee; color: #444; }
+  tr:hover td { background: #fafbfc; }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 4px; font-size: 12px; font-weight: 500; }
+  .badge-rec { background: #e1f5ee; color: #085041; }
+  .badge-alt { background: #fafeda; color: #633806; }
+  .badge-base { background: #f1efe8; color: #444441; }
+  .callout { background: #f0f7ff; border-left: 3px solid #185FA5; padding: 16px 20px; margin: 16px 0; border-radius: 0 8px 8px 0; }
+  .callout-warn { background: #fff8e1; border-left-color: #ef9f27; }
+  .callout-title { font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+  .code-block { background: #f5f5f5; border: 1px solid #e0e0e0; border-radius: 6px; padding: 16px; margin: 12px 0; font-family: "SF Mono", Monaco, "Cascadia Code", monospace; font-size: 13px; overflow-x: auto; line-height: 1.6; }
+  .code-block .comment { color: #888; }
+  .code-block .keyword { color: #185FA5; }
+  .code-block .string { color: #0F6E56; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
+  .card { background: #f8f9fa; border: 1px solid #e8e8e8; border-radius: 8px; padding: 20px; }
+  .card-title { font-size: 14px; font-weight: 600; margin-bottom: 8px; color: #1a1a1a; }
+  .card-body { font-size: 13px; color: #555; }
+  .metric { text-align: center; padding: 16px; background: #f8f9fa; border-radius: 8px; }
+  .metric-value { font-size: 24px; font-weight: 600; color: #185FA5; }
+  .metric-label { font-size: 12px; color: #888; margin-top: 4px; }
+  .metrics-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 16px 0; }
+  .toc { background: #f8f9fa; border-radius: 8px; padding: 20px 24px; margin-bottom: 32px; }
+  .toc-title { font-size: 14px; font-weight: 600; margin-bottom: 10px; }
+  .toc ul { list-style: none; margin: 0; padding: 0; }
+  .toc li { font-size: 13px; margin-bottom: 4px; }
+  .toc a { color: #185FA5; text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  .phase { display: flex; gap: 12px; align-items: flex-start; margin: 12px 0; }
+  .phase-num { flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%; background: #185FA5; color: #fff; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; }
+  .phase-content { flex: 1; }
+  .phase-title { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+  .phase-desc { font-size: 13px; color: #666; }
+  hr { border: none; border-top: 1px solid #eee; margin: 32px 0; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>content_intent_alpha 技术方案</h1>
+<p class="subtitle">内容意图识别工具 — 技术方案参考文档 | 2026-08-06</p>
+
+<div class="toc">
+  <div class="toc-title">目录</div>
+  <ul>
+    <li><a href="#s1">1. 问题分析</a></li>
+    <li><a href="#s2">2. 技术方案选型</a></li>
+    <li><a href="#s3">3. 推荐方案：BERT 句对分类 + ONNX 部署</a></li>
+    <li><a href="#s4">4. 模型选型对比</a></li>
+    <li><a href="#s5">5. 核心技术细节</a></li>
+    <li><a href="#s6">6. 技术栈</a></li>
+    <li><a href="#s7">7. 数据库设计</a></li>
+    <li><a href="#s8">8. 实施路线</a></li>
+  </ul>
+</div>
+
+<h2 id="s1">1. 问题分析</h2>
+
+<p>本项目的核心任务是：给定一个作品内容（如短视频/图文帖子）和用户评论，判断每条评论是否包含特定意图（如购物意向），并给出 0-5 分的意图强度评分。</p>
+
+<div class="callout">
+  <div class="callout-title">关键挑战</div>
+  <ul style="margin-bottom: 0;">
+    <li><b>上下文依赖</b>：评论的意图往往与作品内容相关，不能脱离内容单独判断。例如"多少钱"在购物视频下是购物意向，在搞笑视频下可能只是调侃。</li>
+    <li><b>自定义意图</b>：用户可以定义任意意图目标（购物意向、咨询意向、吐槽等），每个意图需要独立训练模型。</li>
+    <li><b>评分而非二分类</b>：需要 0-5 分的细粒度评分，而非简单的有/无。</li>
+    <li><b>本地部署</b>：模型需导出为 ONNX 格式，在本地 CPU 上高效推理。</li>
+  </ul>
+</div>
+
+<h2 id="s2">2. 技术方案选型</h2>
+
+<p>当前市面上主流的文本意图识别技术方案有以下几类：</p>
+
+<table>
+  <thead>
+    <tr>
+      <th style="width: 180px;">方案</th>
+      <th>原理</th>
+      <th>准确率</th>
+      <th>训练成本</th>
+      <th>部署难度</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><span class="badge badge-base">传统ML</span><br>TF-IDF + SVM</td>
+      <td>词频统计 + 传统分类器</td>
+      <td>低 (~70%)</td>
+      <td>极低</td>
+      <td>简单</td>
+    </tr>
+    <tr>
+      <td><span class="badge badge-alt">嵌入+分类器</span><br>Sentence-BERT + MLP</td>
+      <td>预训练句向量 + 轻量分类头</td>
+      <td>中 (~82%)</td>
+      <td>低</td>
+      <td>简单</td>
+    </tr>
+    <tr>
+      <td><span class="badge badge-rec">BERT 微调</span><br>RoBERTa-wwm-ext</td>
+      <td>预训练模型全参数微调</td>
+      <td>高 (~92%)</td>
+      <td>中</td>
+      <td>中等</td>
+    </tr>
+    <tr>
+      <td><span class="badge badge-alt">LLM Prompt</span><br>GPT-4 / Claude API</td>
+      <td>大模型提示工程，零样本/少样本</td>
+      <td>高 (~90%)</td>
+      <td>零训练</td>
+      <td>需API</td>
+    </tr>
+    <tr>
+      <td><span class="badge badge-alt">轻量蒸馏模型</span><br>TinyBERT / ERNIE Tiny</td>
+      <td>大模型蒸馏的小模型微调</td>
+      <td>中高 (~88%)</td>
+      <td>中</td>
+      <td>简单</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="s3">3. 推荐方案：BERT 句对分类 + ONNX 部署</h2>
+
+<div class="callout">
+  <div class="callout-title">推荐方案</div>
+  <p style="margin-bottom: 0;"><b>RoBERTa-wwm-ext 句对微调 → ONNX 导出 → INT8 量化 → ONNX Runtime 推理</b></p>
+</div>
+
+<p>选择此方案的理由：</p>
+<ol>
+  <li><b>句对输入解决上下文依赖</b>：将作品内容和评论作为句子对输入 BERT，模型能理解评论在作品上下文中的含义。输入格式为 <code>[CLS] 作品内容 [SEP] 评论内容 [SEP]</code>，这是 BERT 原生支持的句对分类任务。</li>
+  <li><b>RoBERTa-wwm-ext 中文表现最优</b>：在全词掩码（Whole Word Masking）策略下预训练，在中文分类任务上稳定优于原版 BERT，是 CLUE 榜单上的常青树。</li>
+  <li><b>ONNX 导出成熟</b>：Hugging Face Optimum 提供一键导出，ONNX Runtime 在 CPU 上推理速度比 PyTorch 快 1.5-3 倍，INT8 量化后模型体积缩小 4 倍。</li>
+  <li><b>自定义意图灵活</b>：每个意图目标独立训练一个模型，模型文件独立存储，互不干扰。切换意图只需加载对应的 ONNX 模型。</li>
+</ol>
+
+<h3>评分方案设计</h3>
+
+<p>0-5 分的评分可以通过以下两种方式实现：</p>
+
+<div class="grid-2">
+  <div class="card">
+    <div class="card-title">方案 A：6 分类（推荐）</div>
+    <div class="card-body">
+      将 0-5 分直接作为 6 个类别，使用交叉熵损失训练。<br><br>
+      <b>优点</b>：训练简单，直接输出分数<br>
+      <b>缺点</b>：需要每类都有足够样本<br>
+      <b>适用</b>：标注数据充足（每类 100+ 条）
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">方案 B：二分类 + 回归</div>
+    <div class="card-body">
+      先二分类（有/无意向），再对有意向的评论做回归打分。<br><br>
+      <b>优点</b>：小数据集更稳定<br>
+      <b>缺点</b>：需训练两个模型<br>
+      <b>适用</b>：标注数据较少时
+    </div>
+  </div>
+</div>
+
+<p>建议初期采用<b>方案 A（6 分类）</b>，标注时直接打 0-5 分。如果某些分数段样本不足，可以合并为 3 类：无意图（0-2）、有意图（3-4）、强意图（5），后续数据充足后再细分。</p>
+
+<h2 id="s4">4. 模型选型对比</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>模型</th>
+      <th>参数量</th>
+      <th>ONNX 大小</th>
+      <th>CPU 推理</th>
+      <th>中文效果</th>
+      <th>推荐场景</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b>RoBERTa-wwm-ext</b><br><span class="badge badge-rec">推荐</span></td>
+      <td>102M</td>
+      <td>~400MB<br>(INT8: ~100MB)</td>
+      <td>~40ms/条</td>
+      <td>优秀</td>
+      <td>首选，精度最高</td>
+    </tr>
+    <tr>
+      <td>ERNIE 3.0 Tiny Medium<br><span class="badge badge-alt">备选</span></td>
+      <td>30M</td>
+      <td>~120MB<br>(INT8: ~30MB)</td>
+      <td>~15ms/条</td>
+      <td>良好</td>
+      <td>追求速度</td>
+    </tr>
+    <tr>
+      <td>BERT-base-chinese<br><span class="badge badge-base">基准</span></td>
+      <td>102M</td>
+      <td>~400MB</td>
+      <td>~40ms/条</td>
+      <td>良好</td>
+      <td>经典基线</td>
+    </tr>
+    <tr>
+      <td>TinyBERT (4层)<br><span class="badge badge-alt">轻量</span></td>
+      <td>14.5M</td>
+      <td>~55MB</td>
+      <td>~8ms/条</td>
+      <td>一般</td>
+      <td>极致轻量</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="callout">
+  <div class="callout-title">推荐策略</div>
+  <p style="margin-bottom: 0;">
+    <b>训练阶段</b>：使用 RoBERTa-wwm-ext（12层），获得最高精度。<br>
+    <b>部署阶段</b>：导出 ONNX + INT8 量化，CPU 推理速度提升 2-4 倍，模型体积缩小至 ~100MB。<br>
+    <b>降级方案</b>：如果 CPU 推理速度不满足需求，可切换为 ERNIE 3.0 Tiny Medium（6层），速度提升 3 倍，精度损失约 2-4%。
+  </p>
+</div>
+
+<h2 id="s5">5. 核心技术细节</h2>
+
+<h3>5.1 数据标注格式</h3>
+
+<div class="code-block">
+<span class="comment"># 标注数据 JSON 格式</span>
+{
+  <span class="string">"intent_goal"</span>: <span class="string">"购物意向"</span>,
+  <span class="string">"content"</span>: <span class="string">"这款口红真的太好看了，色号是枫叶红..."</span>,
+  <span class="string">"comment"</span>: <span class="string">"求链接！想买！"</span>,
+  <span class="string">"score"</span>: 5,           <span class="comment"># 0-5 分，5 = 强烈购物意向</span>
+  <span class="string">"label"</span>: <span class="string">"has_intent"</span>  <span class="comment"># has_intent / no_intent</span>
+}
+</div>
+
+<h3>5.2 模型输入格式（句对分类）</h3>
+
+<div class="code-block">
+<span class="comment"># BERT 句对输入</span>
+[CLS] 这款口红真的太好看了，色号是枫叶红... [SEP] 求链接！想买！ [SEP]
+
+<span class="comment"># Token 化后</span>
+input_ids:      [101, 6821, 3221, 6407, ..., 102, 3614, 6885, 3451, ..., 102]
+attention_mask: [1, 1, 1, 1, ..., 1, 1, 1, 1, ..., 1]
+token_type_ids: [0, 0, 0, 0, ..., 0, 1, 1, 1, 1, ..., 1]
+                              <span class="comment">↑ 作品内容 (segment 0)    ↑ 评论 (segment 1)</span>
+
+<span class="comment"># 最大长度建议 256（作品截断 180 + 评论截断 76）</span>
+</div>
+
+<h3>5.3 训练超参数</h3>
+
+<table>
+  <thead>
+    <tr><th>参数</th><th>推荐值</th><th>说明</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>学习率</td><td>2e-5</td><td>BERT 微调标准值，配合线性预热</td></tr>
+    <tr><td>Batch Size</td><td>16-32</td><td>视显存/内存调整</td></tr>
+    <tr><td>Epochs</td><td>3-5</td><td>小数据集(<10k)用5轮，大数据集用3轮</td></tr>
+    <tr><td>Max Length</td><td>256</td><td>作品180 + 评论76 token</td></tr>
+    <tr><td>Dropout</td><td>0.3</td><td>小数据集防过拟合</td></tr>
+    <tr><td>优化器</td><td>AdamW</td><td>带权重衰减的 Adam</td></tr>
+    <tr><td>学习率调度</td><td>线性预热 + 衰减</td><td>前10%步数预热到峰值</td></tr>
+  </tbody>
+</table>
+
+<h3>5.4 ONNX 导出与量化</h3>
+
+<div class="code-block">
+<span class="comment"># 1. 使用 Hugging Face Optimum 导出 ONNX</span>
+optimum-cli export onnx \
+  --model ./trained_model/ \
+  --task text-classification \
+  --dynamic-axis batch \
+  ./onnx_model/
+
+<span class="comment"># 2. INT8 动态量化（体积缩小 4 倍）</span>
+<span class="keyword">from</span> onnxruntime.quantization <span class="keyword">import</span> quantize_dynamic, QuantType
+
+quantize_dynamic(
+    model_input=<span class="string">"./onnx_model/model.onnx"</span>,
+    model_output=<span class="string">"./onnx_model/model_int8.onnx"</span>,
+    weight_type=QuantType.QInt8,
+)
+</div>
+
+<h3>5.5 ONNX Runtime 推理</h3>
+
+<div class="code-block">
+<span class="keyword">import</span> onnxruntime <span class="keyword">as</span> ort
+<span class="keyword">import</span> numpy <span class="keyword">as</span> np
+<span class="keyword">from</span> transformers <span class="keyword">import</span> AutoTokenizer
+
+<span class="comment"># 加载模型（单例，启动时加载一次）</span>
+session = ort.InferenceSession(<span class="string">"model_int8.onnx"</span>, providers=[<span class="string">"CPUExecutionProvider"</span>])
+tokenizer = AutoTokenizer.from_pretrained(<span class="string">"./onnx_model/"</span>)
+
+<span class="keyword">def</span> predict_score(content: str, comment: str) -> dict:
+    <span class="comment"># 句对输入</span>
+    inputs = tokenizer(content, comment, return_tensors=<span class="string">"np"</span>,
+                       padding=<span class="string">"max_length"</span>, max_length=256, truncation=<span class="string">"longest_first"</span>)
+
+    <span class="comment"># ONNX 推理</span>
+    logits = session.run([<span class="string">"logits"</span>], dict(inputs))[0]
+    probs = np.exp(logits) / np.exp(logits).sum(axis=1, keepdims=True)  <span class="comment"># softmax</span>
+
+    score = int(np.argmax(probs[0]))  <span class="comment"># 0-5</span>
+    confidence = float(probs[0][score])
+
+    <span class="keyword">return</span> {<span class="string">"score"</span>: score, <span class="string">"confidence"</span>: confidence,
+            <span class="string">"has_intent"</span>: score >= 3}
+</div>
+
+<div class="metrics-row">
+  <div class="metric">
+    <div class="metric-value">~100MB</div>
+    <div class="metric-label">INT8 模型体积</div>
+  </div>
+  <div class="metric">
+    <div class="metric-value">~15ms</div>
+    <div class="metric-label">CPU 单条推理</div>
+  </div>
+  <div class="metric">
+    <div class="metric-value">~92%</div>
+    <div class="metric-label">预期准确率</div>
+  </div>
+  <div class="metric">
+    <div class="metric-value">0-5</div>
+    <div class="metric-label">意图评分粒度</div>
+  </div>
+</div>
+
+<h3>5.6 分词说明（无需手动分词）</h3>
+
+<div class="callout">
+  <div class="callout-title">关键澄清</div>
+  <p style="margin-bottom: 0;">
+    RoBERTa-wwm-ext 自带 tokenizer，<b>直接传原始文本即可，不需要 jieba 分词</b>。
+    "全词掩码"(wwm) 是<b>预训练阶段的策略</b>，不是推理阶段的分词方式。
+  </p>
+</div>
+
+<p>处理流程：原始文本 &rarr; AutoTokenizer（模型自带，自动处理）&rarr; token IDs &rarr; RoBERTa 模型 &rarr; logits &rarr; 评分。</p>
+
+<p>只需一行代码：</p>
+
+<div class="code-block">
+<span class="comment"># tokenizer 自动完成：加[CLS][SEP]、中文字符切分、英文子词切分、映射ID、生成mask、截断填充</span>
+inputs = tokenizer(<span class="string">"这款口红太好看了"</span>, <span class="string">"求链接！想买！"</span>,
+                   max_length=256, truncation=<span class="keyword">True</span>, padding=<span class="string">"max_length"</span>)
+</div>
+
+<table>
+  <thead>
+    <tr><th>步骤</th><th>说明</th><th>需要手动管吗</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>加 [CLS] [SEP]</td><td>句首加 [CLS]，句间加 [SEP]</td><td>不用</td></tr>
+    <tr><td>中文字符切分</td><td>每个中文字 &rarr; 一个 token</td><td>不用</td></tr>
+    <tr><td>英文/数字处理</td><td>按子词切分，如 "2026" &rarr; "20"+"26"</td><td>不用</td></tr>
+    <tr><td>映射到 ID</td><td>查 vocab.txt，字 &rarr; 数字</td><td>不用</td></tr>
+    <tr><td>生成 attention_mask</td><td>标记真实 token vs padding</td><td>不用</td></tr>
+    <tr><td>生成 token_type_ids</td><td>标记作品 token vs 评论 token</td><td>不用</td></tr>
+    <tr><td>截断/填充</td><td>超 256 截断，不足补 [PAD]</td><td>不用</td></tr>
+  </tbody>
+</table>
+
+<h2 id="s6">6. 技术栈</h2>
+
+<div class="callout">
+  <div class="callout-title">Web 层架构：纯 Python stdlib 轻量 Server（参考 captcha_app）</div>
+  <p style="margin-bottom: 0;">
+    不使用 Vue / FastAPI / 任何 web 框架。<br>
+    <b>后端</b>：<code>http.server.ThreadingHTTPServer</code> + <code>BaseHTTPRequestHandler</code>，单端口，按 URL 前缀分发到各 API 模块。<br>
+    <b>前端</b>：纯 HTML + CSS + Vanilla JS，iframe 标签页切换，无构建步骤。<br>
+    <b>零 web 依赖</b>：requirements.txt 只需 ML 相关库（torch / transformers / onnxruntime），web 层全部用 Python 标准库。
+  </p>
+</div>
+
+<table>
+  <thead>
+    <tr><th style="width: 120px;">层级</th><th>技术选型</th><th>理由</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b>前端</b></td>
+      <td>纯 HTML + CSS + Vanilla JS</td>
+      <td>零构建、零依赖、iframe 标签页切换，参考 captcha_app</td>
+    </tr>
+    <tr>
+      <td><b>后端</b></td>
+      <td>Python stdlib <code>http.server</code></td>
+      <td>ThreadingHTTPServer 单端口分发，零框架依赖</td>
+    </tr>
+    <tr>
+      <td><b>ML 训练</b></td>
+      <td>PyTorch + Transformers</td>
+      <td>Hugging Face 生态，模型加载/微调一站式</td>
+    </tr>
+    <tr>
+      <td><b>模型导出</b></td>
+      <td>Optimum + ONNX Runtime</td>
+      <td>一键导出、量化、跨平台推理</td>
+    </tr>
+    <tr>
+      <td><b>数据存储</b></td>
+      <td>SQLite (Python stdlib sqlite3)</td>
+      <td>零配置、本地文件、标准库自带</td>
+    </tr>
+    <tr>
+      <td><b>异步任务</b></td>
+      <td>threading.Thread (daemon)</td>
+      <td>训练任务后台线程执行，状态机管理</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>6.1 工程目录结构</h3>
+
+<div class="code-block">
+content_intent_alpha/
+├── intent_app/                 <span class="comment"># 轻量 Web 应用（参考 captcha_app）</span>
+│   ├── server.py              <span class="comment"># 入口：ThreadingHTTPServer + 路由分发</span>
+│   ├── common.py              <span class="comment"># 公共常量：REPO_DIR / safe_join / 路径工具</span>
+│   ├── intent_api.py          <span class="comment"># 意图目标管理 API -> /intent/api/*</span>
+│   ├── labeler_api.py         <span class="comment"># 数据标注 API   -> /lbl/api/*</span>
+│   ├── trainer_api.py         <span class="comment"># 模型训练 API   -> /train/api/*</span>
+│   ├── batch_api.py           <span class="comment"># 数据批跑 API   -> /batch/api/*</span>
+│   ├── trainer_engine.py      <span class="comment"># 后台训练引擎（线程 + 状态机）</span>
+│   └── static/
+│       ├── index.html         <span class="comment"># Shell 页面（iframe 标签页切换）</span>
+│       ├── intent.html        <span class="comment"># 意图目标管理页</span>
+│       ├── labeler.html       <span class="comment"># 数据标注页</span>
+│       ├── trainer.html       <span class="comment"># 模型训练页</span>
+│       └── batch.html         <span class="comment"># 数据批跑页</span>
+├── intent_data/               <span class="comment"># 数据目录</span>
+│   ├── intent.db              <span class="comment"># SQLite 数据库</span>
+│   └── ...
+├── models/                    <span class="comment"># 训练产出的 ONNX 模型</span>
+├── docs/
+│   └── technical_proposal.html
+├── requirements.txt
+└── README.md
+</div>
+
+<h3>6.2 server.py 路由分发模式</h3>
+
+<div class="code-block">
+<span class="comment"># 单端口，按 URL 前缀分发到各 API 模块</span>
+<span class="keyword">class</span> Handler(BaseHTTPRequestHandler):
+    <span class="keyword">def</span> do_GET(self):
+        path = urlparse(self.path).path
+        <span class="keyword">if</span> path == <span class="string">"/"</span>:
+            self._serve_static(<span class="string">"index.html"</span>)
+        <span class="keyword">elif</span> path.startswith(<span class="string">"/static/"</span>):
+            self._serve_static(path[8:])
+        <span class="keyword">elif</span> path.startswith(<span class="string">"/intent/api/"</span>):
+            self._dispatch(<span class="string">"intent"</span>, ...)   <span class="comment"># 意图目标管理</span>
+        <span class="keyword">elif</span> path.startswith(<span class="string">"/lbl/api/"</span>):
+            self._dispatch(<span class="string">"lbl"</span>, ...)       <span class="comment"># 数据标注</span>
+        <span class="keyword">elif</span> path.startswith(<span class="string">"/train/api/"</span>):
+            self._dispatch(<span class="string">"trainer"</span>, ...)   <span class="comment"># 模型训练</span>
+        <span class="keyword">elif</span> path.startswith(<span class="string">"/batch/api/"</span>):
+            self._dispatch(<span class="string">"batch"</span>, ...)     <span class="comment"># 数据批跑</span>
+
+<span class="comment"># 各 API 模块统一接口：handle_get(path, q) / handle_post(path, body)</span>
+<span class="comment"># 返回 (payload, content_type)，content_type 为 None 表示 JSON</span>
+</div>
+
+<h3>6.3 前端 Shell 页面（iframe 标签页切换）</h3>
+
+<div class="code-block">
+<span class="comment">&lt;!-- index.html: 顶部菜单 + iframe 切换，与 captcha_app 完全一致 --&gt;</span>
+&lt;header&gt;
+  &lt;div class="brand"&gt;内容意图工作台&lt;/div&gt;
+  &lt;nav class="menu"&gt;
+    &lt;button data-tab="intent"&gt;意图目标&lt;/button&gt;
+    &lt;button data-tab="labeler"&gt;数据标注&lt;/button&gt;
+    &lt;button data-tab="trainer"&gt;模型训练&lt;/button&gt;
+    &lt;button data-tab="batch"&gt;数据批跑&lt;/button&gt;
+  &lt;/nav&gt;
+&lt;/header&gt;
+&lt;main&gt;
+  &lt;iframe id="f-intent" src="/static/intent.html"&gt;&lt;/iframe&gt;
+  &lt;iframe id="f-labeler" src="/static/labeler.html" class="hidden"&gt;&lt;/iframe&gt;
+  &lt;iframe id="f-trainer" src="/static/trainer.html" class="hidden"&gt;&lt;/iframe&gt;
+  &lt;iframe id="f-batch" src="/static/batch.html" class="hidden"&gt;&lt;/iframe&gt;
+&lt;/main&gt;
+</div>
+
+<h2 id="s7">7. 数据库设计</h2>
+
+<div class="callout">
+  <div class="callout-title">数据规模</div>
+  <p style="margin-bottom: 0;">
+    <b>作品内容</b>：上万条 &nbsp;|&nbsp; <b>评论数据</b>：百万级累积 &nbsp;|&nbsp; <b>标注数据</b>：百万级中标注子集<br>
+    SQLite 完全可以承载百万级数据。关键优化：WAL 模式 + 索引 + 批量写入 + 分页查询。
+  </p>
+</div>
+
+<h3>7.1 SQLite 优化配置</h3>
+
+<div class="code-block">
+<span class="comment"># 连接时必须配置（百万级数据下性能差距巨大）</span>
+conn = sqlite3.connect(<span class="string">"intent_data/intent.db"</span>)
+conn.execute(<span class="string">"PRAGMA journal_mode=WAL"</span>)        <span class="comment"># 读写不互斥</span>
+conn.execute(<span class="string">"PRAGMA synchronous=NORMAL"</span>)     <span class="comment"># 安全且快</span>
+conn.execute(<span class="string">"PRAGMA cache_size=-64000"</span>)     <span class="comment"># 64MB 缓存</span>
+conn.execute(<span class="string">"PRAGMA temp_store=MEMORY"</span>)     <span class="comment"># 临时表走内存</span>
+</div>
+
+<h3>7.2 表结构</h3>
+
+<div class="code-block">
+<span class="comment">-- 意图目标表</span>
+<span class="keyword">CREATE TABLE</span> intent_goals (
+    id          <span class="keyword">INTEGER PRIMARY KEY</span> AUTOINCREMENT,
+    name        TEXT <span class="keyword">NOT NULL</span>,          <span class="comment">-- "购物意向"</span>
+    description TEXT,
+    created_at  DATETIME <span class="keyword">DEFAULT</span> CURRENT_TIMESTAMP
+);
+
+<span class="comment">-- 作品内容表（上万条）</span>
+<span class="keyword">CREATE TABLE</span> contents (
+    id          <span class="keyword">INTEGER PRIMARY KEY</span> AUTOINCREMENT,
+    goal_id     <span class="keyword">INTEGER REFERENCES</span> intent_goals(id),
+    text        TEXT <span class="keyword">NOT NULL</span>,           <span class="comment">-- 作品内容文本</span>
+    created_at  DATETIME <span class="keyword">DEFAULT</span> CURRENT_TIMESTAMP
+);
+<span class="keyword">CREATE INDEX</span> idx_contents_goal <span class="keyword">ON</span> contents(goal_id);
+
+<span class="comment">-- 评论表（百万级，status 区分是否已标注）</span>
+<span class="keyword">CREATE TABLE</span> comments (
+    id          <span class="keyword">INTEGER PRIMARY KEY</span> AUTOINCREMENT,
+    goal_id     <span class="keyword">INTEGER REFERENCES</span> intent_goals(id),
+    content_id  <span class="keyword">INTEGER REFERENCES</span> contents(id),
+    comment     TEXT <span class="keyword">NOT NULL</span>,           <span class="comment">-- 评论内容</span>
+    score       <span class="keyword">INTEGER</span>,                <span class="comment">-- NULL=未标注, 0-5=已标注</span>
+    label       TEXT,                  <span class="comment">-- NULL=未标注, has_intent / no_intent</span>
+    status      TEXT <span class="keyword">DEFAULT</span> <span class="string">'pending'</span>,  <span class="comment">-- pending / labeled / skipped</span>
+    created_at  DATETIME <span class="keyword">DEFAULT</span> CURRENT_TIMESTAMP
+);
+<span class="keyword">CREATE INDEX</span> idx_comments_goal    <span class="keyword">ON</span> comments(goal_id);
+<span class="keyword">CREATE INDEX</span> idx_comments_content <span class="keyword">ON</span> comments(content_id);
+<span class="keyword">CREATE INDEX</span> idx_comments_status  <span class="keyword">ON</span> comments(goal_id, status);
+<span class="keyword">CREATE INDEX</span> idx_comments_score   <span class="keyword">ON</span> comments(goal_id, score);
+
+<span class="comment">-- 模型记录表</span>
+<span class="keyword">CREATE TABLE</span> models (
+    id            <span class="keyword">INTEGER PRIMARY KEY</span> AUTOINCREMENT,
+    goal_id       <span class="keyword">INTEGER REFERENCES</span> intent_goals(id),
+    onnx_path     TEXT <span class="keyword">NOT NULL</span>,         <span class="comment">-- 模型文件路径</span>
+    tokenizer_path TEXT <span class="keyword">NOT NULL</span>,
+    accuracy      REAL,                   <span class="comment">-- 验证准确率</span>
+    f1_score      REAL,
+    num_train_samples <span class="keyword">INTEGER</span>,
+    status        TEXT <span class="keyword">DEFAULT</span> <span class="string">'trained'</span>,  <span class="comment">-- training / trained / failed</span>
+    created_at    DATETIME <span class="keyword">DEFAULT</span> CURRENT_TIMESTAMP
+);
+
+<span class="comment">-- 批跑结果表</span>
+<span class="keyword">CREATE TABLE</span> batch_results (
+    id              <span class="keyword">INTEGER PRIMARY KEY</span> AUTOINCREMENT,
+    model_id        <span class="keyword">INTEGER REFERENCES</span> models(id),
+    comment_id      <span class="keyword">INTEGER REFERENCES</span> comments(id),
+    predicted_score <span class="keyword">INTEGER</span>,
+    predicted_label TEXT,
+    confidence      REAL,
+    is_correct      <span class="keyword">BOOLEAN</span>,
+    created_at      DATETIME <span class="keyword">DEFAULT</span> CURRENT_TIMESTAMP
+);
+<span class="keyword">CREATE INDEX</span> idx_batch_model <span class="keyword">ON</span> batch_results(model_id);
+
+<span class="comment">-- 全文搜索（可选，百万级评论关键词搜索）</span>
+<span class="keyword">CREATE VIRTUAL TABLE</span> comments_fts <span class="keyword">USING</span> fts5(
+    comment, content=<span class="string">'comments'</span>, content_rowid=<span class="string">'id'</span>
+);
+</div>
+
+<h3>7.3 百万级数据写入优化</h3>
+
+<div class="code-block">
+<span class="comment"># 批量导入评论：事务 + executemany，百万条几秒搞定</span>
+<span class="keyword">def</span> batch_import_comments(conn, comments):
+    cursor = conn.cursor()
+    cursor.execute(<span class="string">"BEGIN"</span>)
+    cursor.executemany(
+        <span class="string">"INSERT INTO comments (goal_id, content_id, comment) VALUES (?,?,?)"</span>,
+        [(c[<span class="string">"goal_id"</span>], c[<span class="string">"content_id"</span>], c[<span class="string">"comment"</span>]) <span class="keyword">for</span> c <span class="keyword">in</span> comments]
+    )
+    conn.commit()  <span class="comment"># 一次性提交</span>
+</div>
+
+<h3>7.4 分页查询</h3>
+
+<div class="code-block">
+<span class="comment"># 前端列表绝不能一次查全量，必须分页</span>
+<span class="keyword">SELECT</span> * <span class="keyword">FROM</span> comments <span class="keyword">WHERE</span> goal_id = ? <span class="keyword">AND</span> status = <span class="string">'pending'</span>
+<span class="keyword">ORDER BY</span> id <span class="keyword">LIMIT</span> 50 <span class="keyword">OFFSET</span> ?
+</div>
+
+<h2 id="s8">8. 实施路线</h2>
+
+  <div class="phase">
+    <div class="phase-num">1</div>
+    <div class="phase-content">
+      <div class="phase-title">工程搭建 + 意图目标管理</div>
+      <div class="phase-desc">搭建 intent_app 轻量 server 骨架（ThreadingHTTPServer + common.py + 路由分发），实现意图目标的增删改查。SQLite 数据库初始化，index.html shell 页面 + intent.html 意图管理页。</div>
+    </div>
+  </div>
+
+<div class="phase">
+  <div class="phase-num">2</div>
+  <div class="phase-content">
+    <div class="phase-title">数据标注模块</div>
+    <div class="phase-desc">作品内容录入 + 评论标注界面。支持逐条标注（选 0-5 分），支持批量导入评论数据。标注数据存储到 SQLite。</div>
+  </div>
+</div>
+
+  <div class="phase">
+    <div class="phase-num">3</div>
+    <div class="phase-content">
+      <div class="phase-title">模型训练引擎</div>
+      <div class="phase-desc">集成 PyTorch + Transformers，实现 RoBERTa-wwm-ext 微调训练。trainer_engine.py 后台线程执行训练（状态机：idle/preparing/running/done/stopped/error），前端轮询 /train/api/status 显示训练进度。训练完成后自动导出 ONNX + INT8 量化。</div>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="phase-num">4</div>
+    <div class="phase-content">
+      <div class="phase-title">批跑验证模块</div>
+      <div class="phase-desc">batch_api.py 加载 ONNX 模型，对已标注数据批量推理（后台线程 + 轮询模式，与 captcha_app recognizer 一致）。输出识别率报告（准确率、F1、混淆矩阵），支持按分数段统计。</div>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="phase-num">5</div>
+    <div class="phase-content">
+      <div class="phase-title">实时推理 + 优化</div>
+      <div class="phase-desc">支持输入作品内容 + 评论，实时返回意图评分。模型切换、批量预测 API。前端 vanilla JS 交互打磨。</div>
+    </div>
+  </div>
+
+<hr>
+
+<div class="callout callout-warn">
+  <div class="callout-title">注意事项</div>
+  <ul style="margin-bottom: 0;">
+    <li><b>数据规模</b>：作品上万条、评论百万级累积。SQLite + WAL + 索引完全可以承载，不需要 MySQL。百万级评论中标注子集用于训练。</li>
+    <li><b>训练数据量</b>：每个意图目标建议至少标注 500 条以上评论（正负各半），模型才能达到可用精度。数据不足时可先用方案 B（二分类）。</li>
+    <li><b>分词</b>：不需要手动分词。RoBERTa-wwm-ext 自带 tokenizer，直接传原始文本。"全词掩码"是预训练策略，推理时不涉及。</li>
+    <li><b>GPU 加速</b>：训练阶段强烈建议使用 GPU（CUDA），CPU 训练 102M 参数模型约需数小时。推理阶段 CPU 即可（INT8 量化后约 15ms/条）。</li>
+    <li><b>模型管理</b>：每个意图目标可以训练多个版本的模型，保留历史版本便于回滚和对比。</li>
+    <li><b>数据安全</b>：标注数据中的评论可能包含敏感信息，建议在数据预处理时做脱敏处理。</li>
+  </ul>
+</div>
+
+</div>
+</body>
+</html>

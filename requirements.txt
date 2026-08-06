@@ -1,0 +1,14 @@
+# content_intent_alpha 核心依赖
+
+# ML 训练
+torch>=2.0
+transformers>=4.36
+optimum>=1.16
+onnxruntime>=1.16
+
+# 数据处理
+numpy>=1.24
+
+# 日志（训练引擎用）
+loguru>=0.7.0
+tqdm>=4.66.0
