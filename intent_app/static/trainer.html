@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font: 14px/1.6 -apple-system, "PingFang SC", sans-serif; background: #f0f2f5; color: #1f2328; padding: 20px; }
+  h2 { font-size: 18px; margin-bottom: 16px; }
+  h3 { font-size: 15px; margin-bottom: 12px; }
+  .card { background: #fff; border-radius: 8px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  .row { display: flex; gap: 12px; margin-bottom: 12px; align-items: flex-end; flex-wrap: wrap; }
+  .field { flex: 1; min-width: 120px; }
+  .field label { display: block; font-size: 12px; color: #656d76; margin-bottom: 4px; }
+  input, textarea, select { width: 100%; padding: 8px 12px; border: 1px solid #d0d7de; border-radius: 6px; font-size: 14px; }
+  input:focus { outline: none; border-color: #0969da; }
+  .btn { padding: 8px 20px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600; }
+  .btn-primary { background: #0969da; color: #fff; }
+  .btn-primary:hover { background: #0860ca; }
+  .btn-success { background: #1a7f37; color: #fff; }
+  .btn-danger { background: #cf222e; color: #fff; }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid #eaecef; font-size: 13px; }
+  th { font-size: 12px; color: #656d76; font-weight: 600; }
+  .stat { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+  .stat.blue { background: #ddf4ff; color: #0969da; }
+  .stat.green { background: #dafbe1; color: #1a7f37; }
+  .stat.yellow { background: #fff8c5; color: #9a6700; }
+  .stat.red { background: #ffebe9; color: #cf222e; }
+  .stat.gray { background: #eaeef2; color: #656d76; }
+  .empty { text-align: center; padding: 30px; color: #656d76; }
+  .progress-bar { width: 100%; height: 24px; background: #eaeef2; border-radius: 6px; overflow: hidden; margin: 8px 0; }
+  .progress-fill { height: 100%; background: linear-gradient(90deg, #0969da, #218bff); transition: width .3s; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #fff; font-weight: 600; }
+  .log-box { background: #0d1117; color: #c9d1d9; padding: 12px; border-radius: 6px; font-family: monospace; font-size: 12px; max-height: 300px; overflow-y: auto; line-height: 1.8; }
+  .log-box .log-err { color: #ff7b72; }
+  .log-box .log-ok { color: #7ee787; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .metric-box { text-align: center; padding: 12px; background: #f6f8fa; border-radius: 6px; }
+  .metric-box .val { font-size: 24px; font-weight: 700; }
+  .metric-box .lbl { font-size: 12px; color: #656d76; margin-top: 4px; }
+  canvas { width: 100%; height: 200px; }
+  .actions { display: flex; gap: 6px; }
+  .btn-sm { padding: 4px 12px; font-size: 12px; }
+  .tabs { display: flex; gap: 4px; margin-bottom: 16px; }
+  .tabs button { padding: 8px 16px; border: 1px solid #d0d7de; border-radius: 6px; background: #fff; cursor: pointer; font-size: 14px; }
+  .tabs button.active { background: #0969da; color: #fff; border-color: #0969da; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<h2>模型训练</h2>
+
+<!-- 意图目标选择 -->
+<div class="card">
+  <div class="row">
+    <div class="field" style="max-width:300px;">
+      <label>选择意图目标</label>
+      <select id="goalSelect" onchange="onGoalChange()">
+        <option value="">-- 请选择 --</option>
+      </select>
+    </div>
+  </div>
+  <div id="dataStats" style="display:none;">
+    <div class="grid2" style="grid-template-columns: repeat(4, 1fr);">
+      <div class="metric-box"><div class="val" id="dsTotal">-</div><div class="lbl">总评论</div></div>
+      <div class="metric-box"><div class="val" id="dsLabeled">-</div><div class="lbl">已标注</div></div>
+      <div class="metric-box"><div class="val" id="dsHasIntent">-</div><div class="lbl">有意图(3-5分)</div></div>
+      <div class="metric-box"><div class="val" id="dsNoIntent">-</div><div class="lbl">无意图(0-2分)</div></div>
+    </div>
+    <div id="dsDist" style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;"></div>
+    <div id="dsReady" style="margin-top:8px;"></div>
+  </div>
+</div>
+
+<!-- 功能切换 -->
+<div class="tabs" id="tabs">
+  <button class="active" data-tab="train" onclick="switchTab('train')">训练</button>
+  <button data-tab="models" onclick="switchTab('models')">模型列表</button>
+  <button data-tab="predict" onclick="switchTab('predict')">实时推理</button>
+</div>
+
+<!-- 训练面板 -->
+<div id="tab-train">
+  <div class="card">
+    <h3>训练参数</h3>
+    <div class="row">
+      <div class="field"><label>学习率</label><input id="hpLr" type="number" value="0.00002" step="0.00001"></div>
+      <div class="field"><label>Batch Size</label><input id="hpBs" type="number" value="16" step="1"></div>
+      <div class="field"><label>Epochs</label><input id="hpEp" type="number" value="3" step="1"></div>
+      <div class="field"><label>Max Length</label><input id="hpMl" type="number" value="256" step="16"></div>
+      <div class="field"><label>验证比例</label><input id="hpVr" type="number" value="0.2" step="0.05" min="0.1" max="0.5"></div>
+    </div>
+    <div class="actions">
+      <button class="btn btn-primary" id="btnStart" onclick="startTrain()">开始训练</button>
+      <button class="btn btn-danger" id="btnStop" onclick="stopTrain()" disabled>停止训练</button>
+    </div>
+  </div>
+
+  <div class="card" id="progressCard" style="display:none;">
+    <h3>训练进度</h3>
+    <div class="progress-bar">
+      <div class="progress-fill" id="progressFill" style="width:0%;">0%</div>
+    </div>
+    <div class="grid2" style="grid-template-columns: repeat(5, 1fr); margin-bottom:12px;">
+      <div class="metric-box"><div class="val" id="pgStep" style="font-size:16px;">0/0</div><div class="lbl">步数</div></div>
+      <div class="metric-box"><div class="val" id="pgEpoch" style="font-size:16px;">0/0</div><div class="lbl">Epoch</div></div>
+      <div class="metric-box"><div class="val" id="pgLoss" style="font-size:16px;">-</div><div class="lbl">Loss</div></div>
+      <div class="metric-box"><div class="val" id="pgAcc" style="font-size:16px;">-</div><div class="lbl">验证准确率</div></div>
+      <div class="metric-box"><div class="val" id="pgEta" style="font-size:16px;">-</div><div class="lbl">ETA</div></div>
+    </div>
+    <div class="grid2">
+      <div>
+        <h3 style="font-size:13px;">Loss 曲线</h3>
+        <canvas id="lossChart" width="400" height="200"></canvas>
+      </div>
+      <div>
+        <h3 style="font-size:13px;">验证准确率</h3>
+        <canvas id="accChart" width="400" height="200"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" id="logCard" style="display:none;">
+    <h3>训练日志</h3>
+    <div class="log-box" id="logBox"></div>
+  </div>
+</div>
+
+<!-- 模型列表 -->
+<div id="tab-models" class="card hidden">
+  <h3>已训练模型</h3>
+  <div id="modelList"><div class="empty">请先选择意图目标</div></div>
+</div>
+
+<!-- 实时推理 -->
+<div id="tab-predict" class="card hidden">
+  <h3>实时推理</h3>
+  <div class="row">
+    <div class="field" style="max-width:300px;">
+      <label>选择模型</label>
+      <select id="predictModelSelect"><option value="">-- 请选择 --</option></select>
+    </div>
+  </div>
+  <div class="row">
+    <div class="field">
+      <label>作品内容</label>
+      <textarea id="predictContent" placeholder="输入作品内容..." style="min-height:60px;"></textarea>
+    </div>
+  </div>
+  <div class="row">
+    <div class="field">
+      <label>评论内容</label>
+      <textarea id="predictComment" placeholder="输入评论内容..." style="min-height:60px;"></textarea>
+    </div>
+  </div>
+  <button class="btn btn-primary" onclick="doPredict()">推理</button>
+  <div id="predictResult" style="margin-top:16px;"></div>
+</div>
+
+<script>
+let currentGoalId = null;
+let pollTimer = null;
+
+async function api(path, opts={}) {
+  const res = await fetch(path, { headers: {'Content-Type':'application/json'}, ...opts });
+  return res.json();
+}
+
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function fmtTime(sec) {
+  if (!sec || sec <= 0) return '-';
+  if (sec < 60) return Math.round(sec) + 's';
+  const m = Math.floor(sec / 60);
+  const s = Math.round(sec % 60);
+  return m + 'm' + s + 's';
+}
+
+// ---- 意图目标 ----
+async function loadGoals() {
+  const data = await api('/intent/api/list');
+  const sel = document.getElementById('goalSelect');
+  sel.innerHTML = '<option value="">-- 请选择 --</option>' +
+    (data.goals||[]).map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('');
+}
+
+function onGoalChange() {
+  currentGoalId = document.getElementById('goalSelect').value;
+  if (!currentGoalId) return;
+  loadDataStats();
+  loadModels();
+  loadPredictModels();
+}
+
+// ---- 数据统计 ----
+async function loadDataStats() {
+  if (!currentGoalId) return;
+  const data = await api(`/train/api/data_stats?goal_id=${currentGoalId}`);
+  document.getElementById('dataStats').style.display = 'block';
+  document.getElementById('dsTotal').textContent = data.total_comments;
+  document.getElementById('dsLabeled').textContent = data.labeled;
+  document.getElementById('dsHasIntent').textContent = data.has_intent;
+  document.getElementById('dsNoIntent').textContent = data.no_intent;
+  const dist = data.score_distribution || {};
+  document.getElementById('dsDist').innerHTML = Object.entries(dist).map(([s,c]) =>
+    `<span class="stat ${parseInt(s)>=3?'green':'gray'}">${s}分: ${c}</span>`
+  ).join(' ');
+  const ready = data.ready;
+  document.getElementById('dsReady').innerHTML = ready
+    ? '<span class="stat green">数据就绪，可以训练</span>'
+    : `<span class="stat red">标注数据不足 20 条（当前 ${data.labeled} 条），请继续标注</span>`;
+  document.getElementById('btnStart').disabled = !ready;
+}
+
+// ---- Tab 切换 ----
+function switchTab(tab) {
+  document.querySelectorAll('#tabs button').forEach(b =>
+    b.classList.toggle('active', b.dataset.tab === tab));
+  ['train','models','predict'].forEach(t =>
+    document.getElementById('tab-'+t).classList.toggle('hidden', t !== tab));
+}
+
+// ---- 训练控制 ----
+async function startTrain() {
+  if (!currentGoalId) { alert('请先选择意图目标'); return; }
+  const hp = {
+    learning_rate: parseFloat(document.getElementById('hpLr').value),
+    batch_size: parseInt(document.getElementById('hpBs').value),
+    epochs: parseInt(document.getElementById('hpEp').value),
+    max_length: parseInt(document.getElementById('hpMl').value),
+    val_ratio: parseFloat(document.getElementById('hpVr').value),
+  };
+  const data = await api('/train/api/start', {
+    method:'POST', body: JSON.stringify({goal_id: parseInt(currentGoalId), hyperparams: hp})
+  });
+  if (data.error) { alert(data.error); return; }
+  document.getElementById('btnStart').disabled = true;
+  document.getElementById('btnStop').disabled = false;
+  document.getElementById('progressCard').style.display = 'block';
+  document.getElementById('logCard').style.display = 'block';
+  startPolling();
+}
+
+async function stopTrain() {
+  if (!confirm('确定停止训练？')) return;
+  await api('/train/api/stop', { method:'POST', body: '{}' });
+  document.getElementById('btnStop').disabled = true;
+}
+
+function startPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(pollStatus, 1000);
+  pollStatus();
+}
+
+async function pollStatus() {
+  const data = await api('/train/api/status');
+  const st = data.state;
+  const p = data.progress || {};
+
+  // 进度条
+  const maxSteps = data.max_steps || 1;
+  const pct = Math.round((p.step / maxSteps) * 100);
+  document.getElementById('progressFill').style.width = pct + '%';
+  document.getElementById('progressFill').textContent = pct + '%';
+
+  // 指标
+  document.getElementById('pgStep').textContent = `${p.step}/${maxSteps}`;
+  document.getElementById('pgEpoch').textContent = `${p.epoch||0}/${p.total_epochs||0}`;
+  document.getElementById('pgLoss').textContent = p.avg_loss != null ? p.avg_loss.toFixed(4) : '-';
+  document.getElementById('pgAcc').textContent = p.val_acc != null ? (p.val_acc*100).toFixed(1)+'%' : '-';
+  document.getElementById('pgEta').textContent = fmtTime(p.eta_sec);
+
+  // 图表
+  drawChart('lossChart', (data.metrics||[]).map(m => m.avg_loss), '#0969da');
+  drawChart('accChart', (data.val_points||[]).map(v => v.acc), '#1a7f37');
+
+  // 日志
+  const logs = data.logs || [];
+  const logBox = document.getElementById('logBox');
+  logBox.innerHTML = logs.map(l => {
+    let cls = '';
+    if (l.includes('ERROR')) cls = 'log-err';
+    if (l.includes('新最佳') || l.includes('完成') || l.includes('量化')) cls = 'log-ok';
+    return `<div class="${cls}">${esc(l)}</div>`;
+  }).join('');
+  logBox.scrollTop = logBox.scrollHeight;
+
+  // 状态判断
+  if (st !== 'running') {
+    clearInterval(pollTimer);
+    pollTimer = null;
+    document.getElementById('btnStart').disabled = false;
+    document.getElementById('btnStop').disabled = true;
+    if (st === 'done') {
+      loadDataStats();
+      loadModels();
+      loadPredictModels();
+    }
+  }
+}
+
+// ---- 简易折线图 ----
+function drawChart(canvasId, values, color) {
+  const canvas = document.getElementById(canvasId);
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  if (!values || values.length === 0) {
+    ctx.fillStyle = '#656d76';
+    ctx.font = '13px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('暂无数据', w/2, h/2);
+    return;
+  }
+
+  const padding = 30;
+  const cw = w - padding * 2;
+  const ch = h - padding * 2;
+  const minV = Math.min(...values);
+  const maxV = Math.max(...values);
+  const range = maxV - minV || 1;
+
+  // 网格线
+  ctx.strokeStyle = '#eaecef';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = padding + (ch / 4) * i;
+    ctx.beginPath();
+    ctx.moveTo(padding, y);
+    ctx.lineTo(w - padding, y);
+    ctx.stroke();
+  }
+
+  // 折线
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  values.forEach((v, i) => {
+    const x = padding + (cw / Math.max(1, values.length - 1)) * i;
+    const y = padding + ch - ((v - minV) / range) * ch;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  // 端点
+  ctx.fillStyle = color;
+  values.forEach((v, i) => {
+    const x = padding + (cw / Math.max(1, values.length - 1)) * i;
+    const y = padding + ch - ((v - minV) / range) * ch;
+    ctx.beginPath();
+    ctx.arc(x, y, 3, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  // Y 轴标签
+  ctx.fillStyle = '#656d76';
+  ctx.font = '11px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText(maxV.toFixed(3), 2, padding + 4);
+  ctx.fillText(minV.toFixed(3), 2, h - padding + 4);
+}
+
+// ---- 模型列表 ----
+async function loadModels() {
+  if (!currentGoalId) return;
+  const data = await api(`/train/api/models?goal_id=${currentGoalId}`);
+  const el = document.getElementById('modelList');
+  if (!data.models || data.models.length === 0) {
+    el.innerHTML = '<div class="empty">暂无已训练模型</div>';
+    return;
+  }
+  el.innerHTML = '<table><thead><tr>' +
+    '<th>ID</th><th>准确率</th><th>训练数据</th><th>参数</th><th>ONNX</th><th>创建时间</th><th>操作</th>' +
+    '</tr></thead><tbody>' + data.models.map(m => {
+    const p = m.params || {};
+    return `
+    <tr>
+      <td>${m.id}</td>
+      <td><span class="stat ${m.accuracy>=0.8?'green':m.accuracy>=0.6?'yellow':'red'}">${(m.accuracy*100).toFixed(1)}%</span></td>
+      <td>${m.num_train_samples || '-'} 条</td>
+      <td style="font-size:11px; color:#656d76;">lr=${p.learning_rate||'-'} bs=${p.batch_size||'-'} ep=${p.epochs||'-'}</td>
+      <td>${m.onnx_exists ? '<span class="stat green">存在</span>' : '<span class="stat red">缺失</span>'}</td>
+      <td style="font-size:12px;">${m.created_at||'-'}</td>
+      <td><button class="btn btn-sm btn-primary" onclick="location.href='/batch/api/models?goal_id=${currentGoalId}'">去批跑</button></td>
+    </tr>`;
+  }).join('') + '</tbody></table>';
+}
+
+// ---- 实时推理 ----
+async function loadPredictModels() {
+  if (!currentGoalId) return;
+  const data = await api(`/train/api/models?goal_id=${currentGoalId}`);
+  const sel = document.getElementById('predictModelSelect');
+  sel.innerHTML = '<option value="">-- 请选择 --</option>' +
+    (data.models||[]).filter(m => m.onnx_exists).map(m =>
+      `<option value="${m.id}">#${m.id} (${(m.accuracy*100).toFixed(1)}%)</option>`
+    ).join('');
+}
+
+async function doPredict() {
+  const modelId = document.getElementById('predictModelSelect').value;
+  const content = document.getElementById('predictContent').value.trim();
+  const comment = document.getElementById('predictComment').value.trim();
+  if (!modelId) { alert('请选择模型'); return; }
+  if (!content || !comment) { alert('请输入作品内容和评论'); return; }
+  const data = await api('/train/api/predict', {
+    method:'POST', body: JSON.stringify({model_id: parseInt(modelId), content, comment})
+  });
+  const el = document.getElementById('predictResult');
+  if (data.error) { el.innerHTML = `<span class="stat red">${esc(data.error)}</span>`; return; }
+  const r = data.result;
+  const label = r.score >= 3 ? '有意图' : '无意图';
+  const labelColor = r.score >= 3 ? 'green' : 'gray';
+  let probBars = r.probabilities.map((p, i) => {
+    const w = p * 100;
+    const c = i >= 3 ? '#1a7f37' : '#656d76';
+    return `<div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+      <span style="width:30px; font-size:12px;">${i}分</span>
+      <div style="flex:1; height:20px; background:#eaeef2; border-radius:4px; overflow:hidden;">
+        <div style="width:${w}%; height:100%; background:${c}; transition:width .3s;"></div>
+      </div>
+      <span style="width:50px; text-align:right; font-size:12px;">${(p*100).toFixed(1)}%</span>
+    </div>`;
+  }).join('');
+  el.innerHTML = `
+    <div style="display:flex; gap:16px; align-items:center; margin-bottom:16px;">
+      <div class="metric-box" style="min-width:100px;">
+        <div class="val" style="font-size:36px; color:#0969da;">${r.score}</div>
+        <div class="lbl">预测分数</div>
+      </div>
+      <div class="metric-box" style="min-width:100px;">
+        <div class="val" style="font-size:24px;">${(r.confidence*100).toFixed(1)}%</div>
+        <div class="lbl">置信度</div>
+      </div>
+      <span class="stat ${labelColor}" style="font-size:16px; padding:6px 16px;">${label}</span>
+    </div>
+    <h3 style="font-size:13px; margin-bottom:8px;">分数分布</h3>
+    ${probBars}
+  `;
+}
+
+// ---- 初始化 ----
+loadGoals();
+// 检查是否有正在进行的训练
+api('/train/api/status').then(data => {
+  if (data.state === 'running') {
+    document.getElementById('progressCard').style.display = 'block';
+    document.getElementById('logCard').style.display = 'block';
+    document.getElementById('btnStart').disabled = true;
+    document.getElementById('btnStop').disabled = false;
+    startPolling();
+  }
+});
+</script>
+</body>
+</html>
