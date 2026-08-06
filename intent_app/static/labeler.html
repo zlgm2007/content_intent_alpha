@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font: 14px/1.6 -apple-system, "PingFang SC", sans-serif; background: #f0f2f5; color: #1f2328; padding: 20px; }
+  h2 { font-size: 18px; margin-bottom: 16px; }
+  h3 { font-size: 15px; margin-bottom: 12px; }
+  .card { background: #fff; border-radius: 8px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  .row { display: flex; gap: 12px; margin-bottom: 12px; align-items: flex-end; flex-wrap: wrap; }
+  .field { flex: 1; min-width: 150px; }
+  .field label { display: block; font-size: 12px; color: #656d76; margin-bottom: 4px; }
+  input, textarea, select { width: 100%; padding: 8px 12px; border: 1px solid #d0d7de; border-radius: 6px; font-size: 14px; font-family: inherit; }
+  input:focus, textarea:focus, select:focus { outline: none; border-color: #0969da; }
+  textarea { resize: vertical; min-height: 60px; }
+  .btn { padding: 8px 20px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600; }
+  .btn-primary { background: #0969da; color: #fff; }
+  .btn-primary:hover { background: #0860ca; }
+  .btn-success { background: #1a7f37; color: #fff; }
+  .btn-warn { background: #9a6700; color: #fff; }
+  .btn-danger { background: #cf222e; color: #fff; }
+  .btn-sm { padding: 4px 12px; font-size: 12px; }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid #eaecef; font-size: 13px; }
+  th { font-size: 12px; color: #656d76; font-weight: 600; }
+  .stat { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+  .stat.blue { background: #ddf4ff; color: #0969da; }
+  .stat.green { background: #dafbe1; color: #1a7f37; }
+  .stat.yellow { background: #fff8c5; color: #9a6700; }
+  .stat.red { background: #ffebe9; color: #cf222e; }
+  .stat.gray { background: #eaeef2; color: #656d76; }
+  .empty { text-align: center; padding: 30px; color: #656d76; }
+  .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .score-btn { padding: 3px 10px; border: 1px solid #d0d7de; border-radius: 4px; cursor: pointer; font-size: 12px; background: #fff; }
+  .score-btn:hover { border-color: #0969da; }
+  .score-btn.active { background: #0969da; color: #fff; border-color: #0969da; }
+  .score-btn.s-low.active { background: #656d76; border-color: #656d76; }
+  .score-btn.s-high.active { background: #1a7f37; border-color: #1a7f37; }
+  .comment-item { padding: 12px; border: 1px solid #eaecef; border-radius: 6px; margin-bottom: 8px; }
+  .comment-item .c-text { margin-bottom: 8px; }
+  .comment-item .c-meta { display: flex; gap: 8px; align-items: center; font-size: 12px; color: #656d76; }
+  .pager { display: flex; gap: 8px; align-items: center; justify-content: center; margin-top: 12px; }
+  .tabs { display: flex; gap: 4px; margin-bottom: 16px; }
+  .tabs button { padding: 8px 16px; border: 1px solid #d0d7de; border-radius: 6px; background: #fff; cursor: pointer; font-size: 14px; }
+  .tabs button.active { background: #0969da; color: #fff; border-color: #0969da; }
+  .hidden { display: none; }
+  .import-area textarea { min-height: 150px; font-family: monospace; font-size: 12px; }
+  pre { background: #f6f8fa; padding: 12px; border-radius: 6px; font-size: 12px; overflow-x: auto; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h2>数据标注</h2>
+
+<!-- 意图目标选择 -->
+<div class="card">
+  <div class="row">
+    <div class="field" style="max-width:300px;">
+      <label>选择意图目标</label>
+      <select id="goalSelect" onchange="onGoalChange()">
+        <option value="">-- 请选择 --</option>
+      </select>
+    </div>
+    <div id="statsBox" style="display:flex; gap:8px; align-items:flex-end;"></div>
+  </div>
+</div>
+
+<!-- 功能切换 -->
+<div class="tabs" id="tabs">
+  <button class="active" data-tab="contents" onclick="switchTab('contents')">作品列表</button>
+  <button data-tab="quickLabel" onclick="switchTab('quickLabel')">快速标注</button>
+  <button data-tab="import" onclick="switchTab('import')">批量导入</button>
+</div>
+
+<!-- 作品列表 -->
+<div id="tab-contents" class="card">
+  <h3>添加作品</h3>
+  <div class="row">
+    <div class="field" style="flex:3;">
+      <label>作品内容</label>
+      <textarea id="contentText" placeholder="粘贴作品内容文本..."></textarea>
+    </div>
+    <button class="btn btn-primary" onclick="addContent()">添加作品</button>
+  </div>
+
+  <h3 style="margin-top:16px;">作品列表</h3>
+  <div id="contentList"><div class="empty">请先选择意图目标</div></div>
+  <div id="contentPager" class="pager"></div>
+</div>
+
+<!-- 快速标注 -->
+<div id="tab-quickLabel" class="card hidden">
+  <h3>快速标注 — 未标注评论列表</h3>
+  <p style="font-size:12px; color:#656d76; margin-bottom:12px;">为每条评论选择 0-5 分，3 分以上为有意图，3 分以下为无意图。点击分数即保存。</p>
+  <div id="unlabeledList"><div class="empty">请先选择意图目标</div></div>
+  <div id="unlabeledPager" class="pager"></div>
+</div>
+
+<!-- 批量导入 -->
+<div id="tab-import" class="card hidden">
+  <h3>批量导入数据 (JSON)</h3>
+  <p style="font-size:12px; color:#656d76; margin-bottom:8px;">格式示例：</p>
+  <pre>{
+  "goal_id": 1,
+  "items": [
+    {
+      "content": "作品内容文本",
+      "comments": [
+        {"text": "求链接", "score": 5},
+        {"text": "哈哈哈", "score": 0},
+        {"text": "未标注评论"}
+      ]
+    }
+  ]
+}</pre>
+  <div class="row import-area" style="margin-top:12px;">
+    <div class="field">
+      <label>粘贴 JSON 数据</label>
+      <textarea id="importJson" placeholder='{"goal_id": 1, "items": [...]}'></textarea>
+    </div>
+  </div>
+  <button class="btn btn-success" onclick="importData()">导入</button>
+  <div id="importResult" style="margin-top:12px;"></div>
+</div>
+
+<!-- 作品详情弹窗 -->
+<div id="detailModal" class="card hidden" style="position:fixed; top:20px; left:20px; right:20px; bottom:20px; z-index:1000; overflow:auto; max-width:900px; margin:auto;">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+    <h3>作品详情</h3>
+    <button class="btn btn-sm" onclick="closeDetail()">关闭</button>
+  </div>
+  <div id="detailContent"></div>
+</div>
+
+<script>
+let currentGoalId = null;
+let contentPage = 1;
+let unlabeledPage = 1;
+let pollTimer = null;
+
+async function api(path, opts={}) {
+  const res = await fetch(path, { headers: {'Content-Type':'application/json'}, ...opts });
+  return res.json();
+}
+
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// ---- 意图目标加载 ----
+async function loadGoals() {
+  const data = await api('/intent/api/list');
+  const sel = document.getElementById('goalSelect');
+  const oldVal = sel.value;
+  sel.innerHTML = '<option value="">-- 请选择 --</option>' +
+    (data.goals||[]).map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('');
+  if (oldVal) sel.value = oldVal;
+  if (currentGoalId) sel.value = currentGoalId;
+}
+
+function onGoalChange() {
+  currentGoalId = document.getElementById('goalSelect').value;
+  if (!currentGoalId) return;
+  contentPage = 1;
+  unlabeledPage = 1;
+  loadStats();
+  loadContents();
+  loadUnlabeled();
+}
+
+async function loadStats() {
+  if (!currentGoalId) return;
+  const data = await api(`/lbl/api/stats?goal_id=${currentGoalId}`);
+  const box = document.getElementById('statsBox');
+  const dist = data.score_distribution || {};
+  let distHtml = Object.entries(dist).map(([s,c]) =>
+    `<span class="stat ${parseInt(s)>=3?'green':'gray'}">${s}分:${c}</span>`
+  ).join(' ');
+  box.innerHTML = `
+    <span class="stat blue">总评论 ${data.total}</span>
+    <span class="stat green">已标注 ${data.labeled}</span>
+    <span class="stat yellow">未标注 ${data.unlabeled}</span>
+    ${distHtml}
+  `;
+}
+
+// ---- Tab 切换 ----
+function switchTab(tab) {
+  document.querySelectorAll('#tabs button').forEach(b =>
+    b.classList.toggle('active', b.dataset.tab === tab));
+  ['contents','quickLabel','import'].forEach(t =>
+    document.getElementById('tab-'+t).classList.toggle('hidden', t !== tab));
+}
+
+// ---- 作品列表 ----
+async function loadContents() {
+  if (!currentGoalId) return;
+  const data = await api(`/lbl/api/contents?goal_id=${currentGoalId}&page=${contentPage}&size=20`);
+  const el = document.getElementById('contentList');
+  if (!data.contents || data.contents.length === 0) {
+    el.innerHTML = '<div class="empty">暂无作品，请先添加</div>';
+    document.getElementById('contentPager').innerHTML = '';
+    return;
+  }
+  el.innerHTML = '<table><thead><tr>' +
+    '<th>ID</th><th>作品内容</th><th>评论</th><th>已标注</th><th>操作</th>' +
+    '</tr></thead><tbody>' + data.contents.map(c => `
+    <tr>
+      <td>${c.id}</td>
+      <td style="max-width:400px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${esc(c.text)}">${esc(c.text)}</td>
+      <td><span class="stat blue">${c.comment_count}</span></td>
+      <td><span class="stat ${c.labeled_count>0?'green':'gray'}">${c.labeled_count}</span></td>
+      <td><div class="actions">
+        <button class="btn btn-sm btn-primary" onclick="showDetail(${c.id})">详情/标注</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteContent(${c.id})">删除</button>
+      </div></td>
+    </tr>`).join('') + '</tbody></table>';
+  renderPager('contentPager', data.page, Math.ceil(data.total/data.size), (p) => {
+    contentPage = p; loadContents();
+  });
+}
+
+async function addContent() {
+  const text = document.getElementById('contentText').value.trim();
+  if (!text) { alert('请输入作品内容'); return; }
+  if (!currentGoalId) { alert('请先选择意图目标'); return; }
+  const data = await api('/lbl/api/content_create', {
+    method:'POST', body: JSON.stringify({goal_id: parseInt(currentGoalId), text})
+  });
+  if (data.error) { alert(data.error); return; }
+  document.getElementById('contentText').value = '';
+  loadContents();
+  loadStats();
+}
+
+async function deleteContent(id) {
+  if (!confirm('删除作品将同时删除其所有评论，确定？')) return;
+  const data = await api('/lbl/api/content_delete', { method:'POST', body: JSON.stringify({id}) });
+  if (data.error) { alert(data.error); return; }
+  loadContents();
+  loadStats();
+}
+
+// ---- 作品详情 + 评论标注 ----
+async function showDetail(contentId) {
+  const data = await api(`/lbl/api/content_detail?id=${contentId}`);
+  if (data.error) { alert(data.error); return; }
+  const c = data.content;
+  const comments = data.comments || [];
+  let html = `
+    <div class="card" style="margin-bottom:16px;">
+      <h3>作品 #${c.id}</h3>
+      <p style="white-space:pre-wrap; margin-top:8px;">${esc(c.text)}</p>
+    </div>
+    <div class="row">
+      <div class="field" style="flex:3;">
+        <label>添加评论（每行一条）</label>
+        <textarea id="batchComments" placeholder="评论1&#10;评论2&#10;评论3"></textarea>
+      </div>
+      <button class="btn btn-primary" onclick="addBatchComments(${c.id})">批量添加</button>
+    </div>
+    <h3 style="margin-top:16px;">评论列表 (${comments.length})</h3>
+  `;
+  if (comments.length === 0) {
+    html += '<div class="empty">暂无评论</div>';
+  } else {
+    html += comments.map(cm => {
+      let scoreHtml = '';
+      for (let s = 0; s <= 5; s++) {
+        const cls = s >= 3 ? 's-high' : 's-low';
+        const active = cm.score === s ? 'active' : '';
+        scoreHtml += `<button class="score-btn ${cls} ${active}" onclick="labelComment(${cm.id}, ${s}, ${c.id})">${s}</button>`;
+      }
+      const labelBadge = cm.status === 'labeled'
+        ? `<span class="stat ${cm.score>=3?'green':'gray'}">${cm.score}分 / ${cm.label==='has_intent'?'有意图':'无意图'}</span>`
+        : `<span class="stat yellow">未标注</span>`;
+      return `
+        <div class="comment-item">
+          <div class="c-text">${esc(cm.comment)}</div>
+          <div class="c-meta">
+            ${labelBadge}
+            <span>#${cm.id}</span>
+            <div class="actions" style="margin-left:auto;">
+              ${scoreHtml}
+              ${cm.status==='labeled' ? `<button class="btn btn-sm" onclick="unlabelComment(${cm.id}, ${c.id})">取消标注</button>` : ''}
+              <button class="btn btn-sm btn-danger" onclick="deleteComment(${cm.id}, ${c.id})">删除</button>
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+  }
+  document.getElementById('detailContent').innerHTML = html;
+  document.getElementById('detailModal').classList.remove('hidden');
+}
+
+function closeDetail() {
+  document.getElementById('detailModal').classList.add('hidden');
+}
+
+async function addBatchComments(contentId) {
+  const text = document.getElementById('batchComments').value.trim();
+  if (!text) { alert('请输入评论'); return; }
+  const comments = text.split('\n').map(s => s.trim()).filter(s => s);
+  const data = await api('/lbl/api/comment_batch', {
+    method:'POST', body: JSON.stringify({
+      goal_id: parseInt(currentGoalId),
+      content_id: contentId,
+      comments
+    })
+  });
+  if (data.error) { alert(data.error); return; }
+  showDetail(contentId);
+  loadContents();
+  loadStats();
+}
+
+async function labelComment(commentId, score, contentId) {
+  const data = await api('/lbl/api/comment_label', {
+    method:'POST', body: JSON.stringify({id: commentId, score})
+  });
+  if (data.error) { alert(data.error); return; }
+  showDetail(contentId);
+  loadStats();
+}
+
+async function unlabelComment(commentId, contentId) {
+  const data = await api('/lbl/api/comment_unlabel', {
+    method:'POST', body: JSON.stringify({id: commentId})
+  });
+  if (data.error) { alert(data.error); return; }
+  showDetail(contentId);
+  loadStats();
+}
+
+async function deleteComment(commentId, contentId) {
+  if (!confirm('确定删除这条评论？')) return;
+  const data = await api('/lbl/api/comment_delete', {
+    method:'POST', body: JSON.stringify({id: commentId})
+  });
+  if (data.error) { alert(data.error); return; }
+  showDetail(contentId);
+  loadContents();
+  loadStats();
+}
+
+// ---- 快速标注 ----
+async function loadUnlabeled() {
+  if (!currentGoalId) return;
+  const data = await api(`/lbl/api/unlabeled?goal_id=${currentGoalId}&page=${unlabeledPage}&size=20`);
+  const el = document.getElementById('unlabeledList');
+  if (!data.items || data.items.length === 0) {
+    el.innerHTML = '<div class="empty">没有未标注评论了</div>';
+    document.getElementById('unlabeledPager').innerHTML = '';
+    return;
+  }
+  el.innerHTML = data.items.map(cm => {
+    let scoreHtml = '';
+    for (let s = 0; s <= 5; s++) {
+      const cls = s >= 3 ? 's-high' : 's-low';
+      scoreHtml += `<button class="score-btn ${cls}" onclick="quickLabel(${cm.id}, ${s})">${s}</button>`;
+    }
+    return `
+      <div class="comment-item">
+        <div style="font-size:12px; color:#656d76; margin-bottom:4px;">作品: ${esc(cm.content_text||'').substring(0,80)}...</div>
+        <div class="c-text">${esc(cm.comment)}</div>
+        <div class="c-meta">
+          <span>#${cm.id}</span>
+          <div class="actions" style="margin-left:auto;">
+            ${scoreHtml}
+            <button class="btn btn-sm" onclick="quickSkip(${cm.id})">跳过</button>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+  renderPager('unlabeledPager', data.page, Math.ceil(data.total/data.size), (p) => {
+    unlabeledPage = p; loadUnlabeled();
+  });
+}
+
+async function quickLabel(commentId, score) {
+  const data = await api('/lbl/api/comment_label', {
+    method:'POST', body: JSON.stringify({id: commentId, score})
+  });
+  if (data.error) { alert(data.error); return; }
+  loadUnlabeled();
+  loadStats();
+}
+
+async function quickSkip(commentId) {
+  // 简单实现：刷新列表，跳过即标记为 skipped
+  // 这里暂不实现 skip，直接刷新
+  loadUnlabeled();
+}
+
+// ---- 批量导入 ----
+async function importData() {
+  const raw = document.getElementById('importJson').value.trim();
+  if (!raw) { alert('请粘贴 JSON 数据'); return; }
+  let body;
+  try { body = JSON.parse(raw); }
+  catch(e) { alert('JSON 格式错误: ' + e.message); return; }
+  if (!body.goal_id) body.goal_id = parseInt(currentGoalId);
+  if (!body.goal_id) { alert('缺少 goal_id'); return; }
+  const data = await api('/lbl/api/import_data', {
+    method:'POST', body: JSON.stringify(body)
+  });
+  const el = document.getElementById('importResult');
+  if (data.error) {
+    el.innerHTML = `<span class="stat red">${esc(data.error)}</span>`;
+    return;
+  }
+  el.innerHTML = `<span class="stat green">导入成功: ${data.contents} 个作品, ${data.comments} 条评论</span>`;
+  document.getElementById('importJson').value = '';
+  loadStats();
+  loadContents();
+}
+
+// ---- 分页 ----
+function renderPager(elId, page, totalPages, cb) {
+  const el = document.getElementById(elId);
+  if (totalPages <= 1) { el.innerHTML = ''; return; }
+  let html = '';
+  html += `<button class="btn btn-sm" ${page<=1?'disabled':''} onclick="__pager('${elId}',${page-1})">上一页</button>`;
+  html += `<span> ${page} / ${totalPages} </span>`;
+  html += `<button class="btn btn-sm" ${page>=totalPages?'disabled':''} onclick="__pager('${elId}',${page+1})">下一页</button>`;
+  el.innerHTML = html;
+  el._cb = cb;
+}
+
+function __pager(elId, page) {
+  const el = document.getElementById(elId);
+  if (el._cb) el._cb(page);
+}
+
+// ---- 初始化 ----
+loadGoals();
+</script>
+</body>
+</html>
