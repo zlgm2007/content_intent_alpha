@@ -36,6 +36,18 @@ def _score_to_label(score):
     return "has_intent" if score >= SCORE_THRESHOLD else "no_intent"
 
 
+def _score_where(sel_none, sel_scores):
+    """构造评分筛选 WHERE（OR 语义）。none=未标注(pending)，分数=已标注且 score=?。全参数化。"""
+    conds = []
+    params = []
+    if sel_none:
+        conds.append("status = 'pending'")
+    for s in sel_scores:
+        conds.append("status = 'labeled' AND score = ?")
+        params.append(s)
+    return "(" + " OR ".join(conds) + ")", params
+
+
 class LabelerAPI:
     """数据标注 API。"""
 
@@ -161,32 +173,40 @@ class LabelerAPI:
         })
 
     def _get_unlabeled(self, q):
-        """获取未标注评论（分页，供快速标注用）。合并手工(comments) + 外部(annotations)。"""
+        """获取评论列表（分页，供快速标注用）。scores=逗号分隔，none=未标注 + 0-5 分，OR 语义。"""
         goal_id = int(self._q(q, "goal_id", "0"))
         page = int(self._q(q, "page", "1"))
         size = min(int(self._q(q, "size", "20")), 100)
         if goal_id <= 0:
             raise ValueError("缺少 goal_id")
+        raw = self._q(q, "scores", None)
+        sel = [s.strip() for s in (raw if raw is not None else "none").split(",") if s.strip()]
+        sel_none = "none" in sel
+        sel_scores = sorted({int(s) for s in sel if s.isdigit() and 0 <= int(s) <= 5})
         offset = (page - 1) * size
-        rows = db.query_all("""
+        if not sel_none and not sel_scores:
+            return _json({"items": [], "total": 0, "page": page, "size": size})
+        where, wparams = _score_where(sel_none, sel_scores)
+        rows = db.query_all(f"""
             SELECT * FROM (
                 SELECT cm.id AS id, 'manual' AS source,
                        cm.comment AS comment, cm.raw_score AS raw_score,
-                       ct.text AS content_text
+                       cm.score AS score, ct.text AS content_text
                 FROM comments cm JOIN contents ct ON cm.content_id = ct.id
-                WHERE cm.goal_id = ? AND cm.status = 'pending'
+                WHERE cm.goal_id = ? AND {where}
                 UNION ALL
                 SELECT a.id AS id, 'es' AS source,
                        COALESCE(a.comment, '') AS comment, a.raw_score AS raw_score,
+                       a.score AS score,
                        COALESCE(w.content, w.note_title, '') AS content_text
                 FROM annotations a JOIN works w ON a.work_id = w.id
-                WHERE a.goal_id = ? AND a.status = 'pending'
+                WHERE a.goal_id = ? AND {where}
             ) ORDER BY id DESC LIMIT ? OFFSET ?
-        """, (goal_id, goal_id, size, offset))
-        total = db.query_one("""
-            SELECT (SELECT COUNT(*) FROM comments WHERE goal_id = ? AND status = 'pending')
-                 + (SELECT COUNT(*) FROM annotations WHERE goal_id = ? AND status = 'pending') AS n
-        """, (goal_id, goal_id))["n"]
+        """, (goal_id, *wparams, goal_id, *wparams, size, offset))
+        total = db.query_one(f"""
+            SELECT (SELECT COUNT(*) FROM comments WHERE goal_id = ? AND {where})
+                 + (SELECT COUNT(*) FROM annotations WHERE goal_id = ? AND {where}) AS n
+        """, (goal_id, *wparams, goal_id, *wparams))["n"]
         return _json({"items": rows, "total": total, "page": page, "size": size})
 
     # ---- POST ----

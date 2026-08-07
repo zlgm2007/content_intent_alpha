@@ -1,0 +1,15 @@
+{
+  "goal_id": 1,
+  "goal_name": "购买意图",
+  "accuracy": 0.7510822510822511,
+  "pretrained_model": "hfl/chinese-roberta-wwm-ext",
+  "num_labels": 6,
+  "hyperparams": {
+    "epochs": 3,
+    "batch_size": 32,
+    "max_length": 256,
+    "learning_rate": 2e-05,
+    "val_ratio": 0.2
+  },
+  "exported_at": "20260807_174443"
+}

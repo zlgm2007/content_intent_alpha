@@ -219,12 +219,24 @@ async function deleteComment(commentId, contentId) {
 }
 
 // ---- 快速标注 ----
+function quickFilterScores() {
+  const sel = [...document.querySelectorAll('#tab-quickLabel input[type=checkbox]:checked')]
+    .map(c => c.value);
+  // 全不选时用显式标记，避免空参数被 URL 解析丢弃（后端会按无效组合返回空结果）
+  return sel.length ? sel.join(',') : '__empty';
+}
+
+function onQuickFilter() {
+  unlabeledPage = 1;
+  loadUnlabeled();
+}
+
 async function loadUnlabeled() {
   if (!currentGoalId) return;
-  const data = await api(`/lbl/api/unlabeled?goal_id=${currentGoalId}&page=${unlabeledPage}&size=20`);
+  const data = await api(`/lbl/api/unlabeled?goal_id=${currentGoalId}&page=${unlabeledPage}&size=20&scores=${quickFilterScores()}`);
   const el = document.getElementById('unlabeledList');
   if (!data.items || data.items.length === 0) {
-    el.innerHTML = '<div class="empty">没有未标注评论了</div>';
+    el.innerHTML = '<div class="empty">没有符合条件的评论</div>';
     document.getElementById('unlabeledPager').innerHTML = '';
     return;
   }
@@ -232,7 +244,8 @@ async function loadUnlabeled() {
     let scoreHtml = '';
     for (let s = 0; s <= 5; s++) {
       const cls = s >= 3 ? 's-high' : 's-low';
-      scoreHtml += `<button class="score-btn ${cls}" onclick="quickLabel('${cm.source}', ${cm.id}, ${s})">${s}</button>`;
+      const cur = cm.score != null && cm.score === s ? ' active' : '';
+      scoreHtml += `<button class="score-btn ${cls}${cur}" onclick="quickLabel('${cm.source}', ${cm.id}, ${s})">${s}</button>`;
     }
     const srcBadge = cm.source === 'es'
       ? `<span class="stat blue">外部</span>`

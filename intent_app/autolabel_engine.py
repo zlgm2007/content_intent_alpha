@@ -2,15 +2,15 @@
 # -*- coding: utf-8 -*-
 # Copyright (c) 2026 周亮 Ryo Zhou
 # Licensed under the MIT License. See LICENSE for details.
-"""自动标注引擎 — 用已训练 ONNX 模型批量预测未标注评论，高置信度写库。
+"""自动标注引擎 — 用已训练 ONNX 模型批量预测未标注评论，全部写库。
 
 状态机：idle → running → done/stopped/error（镜像 trainer_engine.TrainerEngine）
 
 流程：
   1. 加载指定目标、指定已训练模型的 ONNX 推理器
   2. 取该目标全部未标注评论（手工 comments.pending + 外部 annotations.pending）
-  3. 分批推理，confidence >= threshold 的写入 score/label/status='labeled'，auto_labeled=1
-  4. 低置信度保持 pending；进度通过 status() 轮询，支持 stop
+  3. 分批推理全部写库：confidence >= threshold 写模型得分，低置信写 score=0（无意图）
+  4. 所有评论标记为已标注（status='labeled'，auto_labeled=1），移出待标注；进度经 status() 轮询，支持 stop
 """
 import os
 import time
@@ -171,29 +171,30 @@ class AutoLabelEngine:
                 pairs = [(r["content_text"] or "", r["comment"] or "")
                          for r in chunk]
                 preds = inferencer.predict_batch(pairs, batch_size=BATCH_SIZE)
-                hits = []
+                results = []
                 for r, pr in zip(chunk, preds):
-                    if pr["confidence"] >= threshold:
-                        hits.append((r["source"], r["id"], pr["score"]))
-                    else:
+                    # 全部写库：高置信写模型得分，低置信记 0 分（无意图），避免重复标记
+                    results.append((r["source"], r["id"],
+                                    pr["score"] if pr["confidence"] >= threshold else 0))
+                    if pr["confidence"] < threshold:
                         low_conf += 1
-                labeled += len(hits)
+                labeled += len(results)
                 processed += len(chunk)
-                self._write_hits(hits)
+                self._write_results(results)
                 self.progress.update({
                     "phase": "writing", "processed": processed,
                     "labeled": labeled, "low_conf": low_conf,
                     "elapsed": round(time.time() - start_time, 1),
                     "percent": int(processed / total * 100) if total else 0,
                 })
-                self._log(f"已处理 {processed}/{total} 命中 {labeled} 低置信 {low_conf}")
+                self._log(f"已处理 {processed}/{total} 标注 {labeled} 低置信记0 {low_conf}")
 
             if self._stop.is_set():
                 self._finish("stopped", f"用户手动停止，已标注 {labeled} 条", start_time)
             else:
                 self._finish(
                     "done",
-                    f"完成: 标注 {labeled} 条，低置信保留 {low_conf} 条", start_time)
+                    f"完成: 标注 {labeled} 条（低置信记0分 {low_conf} 条）", start_time)
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -209,13 +210,13 @@ class AutoLabelEngine:
         self.progress["elapsed"] = round(time.time() - start_time, 1)
         self._log(f"自动标注结束: {reason}, 耗时 {self.progress['elapsed']}s")
 
-    def _write_hits(self, hits):
-        """把命中项按来源分表写库（每批一个事务）。"""
-        if not hits:
+    def _write_results(self, results):
+        """把全部标注结果按来源分表写库（每批一个事务）；低置信已映射为 score=0。"""
+        if not results:
             return
         import db
-        manual = [h for h in hits if h[0] == "manual"]
-        es = [h for h in hits if h[0] == "es"]
+        manual = [h for h in results if h[0] == "manual"]
+        es = [h for h in results if h[0] == "es"]
         conn = db.get_conn()
         try:
             if manual:
