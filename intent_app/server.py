@@ -4,11 +4,13 @@
 # Licensed under the MIT License. See LICENSE for details.
 """内容意图工作台 — 单端口 Web 应用入口.
 
-集成四个功能，顶部菜单切换（前端 shell 用 iframe 内嵌）：
+集成六个功能，顶部菜单切换（前端 shell 用 iframe 内嵌）：
   意图目标管理(IntentAPI)  -> /intent/api/*
   数据标注(LabelerAPI)      -> /lbl/api/*
   模型训练(TrainerAPI)      -> /train/api/*
   数据批跑(BatchAPI)        -> /batch/api/*
+  外部数据同步(SyncAPI)     -> /sync/api/*
+  自动标注(AutoLabelAPI)    -> /autolabel/api/*
   静态页面                  -> / 与 /static/*
 
 用法: python intent_app/server.py [--port 8800]
@@ -28,6 +30,8 @@ from db import init_db  # noqa: E402
 from intent_api import IntentAPI  # noqa: E402
 from labeler_api import LabelerAPI  # noqa: E402
 from batch_api import BatchAPI  # noqa: E402
+from es_sync_api import SyncAPI  # noqa: E402
+from autolabel_api import AutoLabelAPI  # noqa: E402
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 MAX_BODY = 50 * 1024 * 1024  # 50MB，批量导入评论数据
@@ -123,6 +127,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._dispatch("trainer", path[len("/train/api/"):], q)
             elif path.startswith("/batch/api/"):
                 self._dispatch("batch", path[len("/batch/api/"):], q)
+            elif path.startswith("/sync/api/"):
+                self._dispatch("sync", path[len("/sync/api/"):], q)
+            elif path.startswith("/autolabel/api/"):
+                self._dispatch("autolabel", path[len("/autolabel/api/"):], q)
             else:
                 self._send_json({"error": "not found"}, 404)
         except ValueError as e:
@@ -142,6 +150,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._dispatch("trainer", path[len("/train/api/"):], None, body, True)
             elif path.startswith("/batch/api/"):
                 self._dispatch("batch", path[len("/batch/api/"):], None, body, True)
+            elif path.startswith("/sync/api/"):
+                self._dispatch("sync", path[len("/sync/api/"):], None, body, True)
+            elif path.startswith("/autolabel/api/"):
+                self._dispatch("autolabel", path[len("/autolabel/api/"):], None, body, True)
             else:
                 self._send_json({"error": "not found"}, 404)
         except ValueError as e:
@@ -161,6 +173,8 @@ def main():
     server.intent = IntentAPI()
     server.lbl = LabelerAPI()
     server.batch = BatchAPI()
+    server.sync = SyncAPI()
+    server.autolabel = AutoLabelAPI()
     try:
         from trainer_api import TrainerAPI
         server.trainer = TrainerAPI()
@@ -172,7 +186,7 @@ def main():
     print("=" * 56)
     print("  内容意图工作台 已启动")
     print(f"  打开浏览器: {url}")
-    print("  功能: 意图管理 / 数据标注 / 模型训练 / 数据批跑")
+    print("  功能: 意图管理 / 数据标注 / 模型训练 / 数据批跑 / 外部数据同步 / 自动标注")
     print("  按 Ctrl+C 停止")
     print("=" * 56)
     try:

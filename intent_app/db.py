@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS comments (
     score       INTEGER,                          -- NULL=未标注, 0-5=已标注
     label       TEXT,                             -- NULL=未标注, has_intent / no_intent
     status      TEXT NOT NULL DEFAULT 'pending',  -- pending / labeled / skipped
+    auto_labeled INTEGER DEFAULT 0,               -- 1=由自动标注引擎写入
     created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -53,6 +54,7 @@ CREATE TABLE IF NOT EXISTS comments (
 CREATE TABLE IF NOT EXISTS models (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
     goal_id           INTEGER NOT NULL REFERENCES intent_goals(id) ON DELETE CASCADE,
+    name              TEXT,                              -- 可读名称（如 raw_3ep_acc_0.7511）
     onnx_path         TEXT NOT NULL,
     tokenizer_dir     TEXT,
     accuracy          REAL,
@@ -74,6 +76,65 @@ CREATE TABLE IF NOT EXISTS batch_results (
     is_correct      BOOLEAN,
     created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+-- 作品表（ES 同步的外部平台作品）
+CREATE TABLE IF NOT EXISTS works (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    goal_id         INTEGER NOT NULL REFERENCES intent_goals(id) ON DELETE CASCADE,
+    note_id         TEXT NOT NULL,                 -- ES noteId 外部作品ID
+    note_title      TEXT,                          -- ES noteTitle
+    content         TEXT,                          -- ES noteDesc 作品内容
+    platform        TEXT,                          -- ES platform
+    author_nickname TEXT,                          -- ES authorNickname
+    author_id       TEXT,                          -- ES authorId
+    note_time       INTEGER,                       -- ES noteTime (epoch_millis)
+    note_type       TEXT,                          -- ES noteType
+    note_cover      TEXT,                          -- ES noteCover
+    note_video      TEXT,                          -- ES noteVideo
+    note_url        TEXT,                          -- ES 作品链接
+    topics          TEXT,                          -- ES noteTopics
+    source_index    TEXT,                          -- 来源索引 ge3/lt3
+    sync_id         INTEGER,                       -- 同步批次ID
+    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (goal_id, note_id)
+);
+
+-- 标注表（ES 同步评论 + 人工标注）
+CREATE TABLE IF NOT EXISTS annotations (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    goal_id            INTEGER NOT NULL REFERENCES intent_goals(id) ON DELETE CASCADE,
+    work_id            INTEGER NOT NULL REFERENCES works(id) ON DELETE CASCADE,
+    comment_id         TEXT NOT NULL,              -- ES commentId 外部评论ID
+    comment            TEXT,                       -- ES commentContent 评论内容
+    raw_score          INTEGER,                    -- ES intentScore 原始得分
+    score              INTEGER,                    -- 标注值 0-5（人工）
+    label              TEXT,                       -- has_intent / no_intent
+    status             TEXT NOT NULL DEFAULT 'pending',  -- pending / labeled / skipped
+    auto_labeled       INTEGER DEFAULT 0,          -- 1=由自动标注引擎写入
+    comment_create_time INTEGER,                   -- ES commentCreateTime
+    comment_user_name  TEXT,                       -- ES commentUserName
+    source_index       TEXT,                       -- 来源索引 ge3/lt3
+    sync_id            INTEGER,                    -- 同步批次ID
+    created_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (work_id, comment_id)
+);
+
+-- 同步批次表（历史记录）
+CREATE TABLE IF NOT EXISTS sync_batches (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    goal_id        INTEGER NOT NULL,
+    indices        TEXT,                          -- ge3/lt3/both
+    days           INTEGER,                       -- 按天数同步：最近 N 天
+    sync_limit     INTEGER,                       -- 按条数同步：最近 N 条（与 days 互斥）
+    state          TEXT NOT NULL DEFAULT 'running',  -- running / done / stopped / error
+    works_inserted INTEGER DEFAULT 0,
+    works_skipped  INTEGER DEFAULT 0,
+    ann_inserted   INTEGER DEFAULT 0,
+    ann_skipped    INTEGER DEFAULT 0,
+    error          TEXT,
+    started_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+    finished_at    DATETIME
+);
 """
 
 INDEXES = [
@@ -85,7 +146,38 @@ INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_models_goal ON models(goal_id)",
     "CREATE INDEX IF NOT EXISTS idx_batch_model ON batch_results(model_id)",
     "CREATE INDEX IF NOT EXISTS idx_batch_comment ON batch_results(comment_id)",
+    "CREATE INDEX IF NOT EXISTS idx_works_goal ON works(goal_id)",
+    "CREATE INDEX IF NOT EXISTS idx_ann_goal ON annotations(goal_id, status)",
+    "CREATE INDEX IF NOT EXISTS idx_ann_work ON annotations(work_id)",
+    "CREATE INDEX IF NOT EXISTS idx_ann_comment ON annotations(comment_id)",
+    "CREATE INDEX IF NOT EXISTS idx_sync_goal ON sync_batches(goal_id, id)",
 ]
+
+# 老表补充 ES 同步所需字段（幂等，缺失才 ALTER）
+_MIGRATE_COLUMNS = [
+    ("contents", "note_id", "TEXT"),
+    ("contents", "platform", "TEXT"),
+    ("contents", "note_title", "TEXT"),
+    ("contents", "note_time", "INTEGER"),
+    ("contents", "source_index", "TEXT"),
+    ("contents", "sync_id", "INTEGER"),
+    ("comments", "comment_id", "TEXT"),
+    ("comments", "raw_score", "INTEGER"),
+    ("comments", "source_index", "TEXT"),
+    ("comments", "sync_id", "INTEGER"),
+    ("comments", "auto_labeled", "INTEGER"),
+    ("annotations", "auto_labeled", "INTEGER"),
+    ("sync_batches", "sync_limit", "INTEGER"),
+    ("models", "name", "TEXT"),
+]
+
+
+def _migrate(conn):
+    """给现有 contents/comments 表补充缺失字段，幂等。"""
+    for table, col, ddl in _MIGRATE_COLUMNS:
+        cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if col not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
 
 
 def init_db():
@@ -103,6 +195,7 @@ def init_db():
             conn.executescript(SCHEMA)
             for idx in INDEXES:
                 conn.execute(idx)
+            _migrate(conn)
             conn.commit()
         finally:
             conn.close()

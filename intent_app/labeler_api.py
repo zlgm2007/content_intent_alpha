@@ -54,19 +54,35 @@ class LabelerAPI:
         if goal_id <= 0:
             raise ValueError("缺少 goal_id")
         offset = (page - 1) * size
+        # 合并 手工录入(contents) + 外部同步(works) 作品，来源用 source 区分
         rows = db.query_all("""
-            SELECT c.*,
-                   (SELECT COUNT(*) FROM comments WHERE content_id = c.id) AS comment_count,
-                   (SELECT COUNT(*) FROM comments WHERE content_id = c.id
-                    AND status = 'labeled') AS labeled_count
-            FROM contents c
-            WHERE c.goal_id = ?
-            ORDER BY c.id DESC
+            SELECT * FROM (
+                SELECT c.id AS id, 'manual' AS source,
+                       c.text AS text, c.note_id AS note_id,
+                       c.note_title AS note_title, c.platform AS platform,
+                       c.source_index AS source_index, c.created_at AS created_at,
+                       (SELECT COUNT(*) FROM comments cm WHERE cm.content_id = c.id) AS comment_count,
+                       (SELECT COUNT(*) FROM comments cm WHERE cm.content_id = c.id
+                        AND cm.status = 'labeled') AS labeled_count
+                FROM contents c WHERE c.goal_id = ?
+                UNION ALL
+                SELECT w.id AS id, 'es' AS source,
+                       COALESCE(w.content, w.note_title, '') AS text,
+                       w.note_id AS note_id, w.note_title AS note_title,
+                       w.platform AS platform, w.source_index AS source_index,
+                       w.created_at AS created_at,
+                       (SELECT COUNT(*) FROM annotations a WHERE a.work_id = w.id) AS comment_count,
+                       (SELECT COUNT(*) FROM annotations a WHERE a.work_id = w.id
+                        AND a.status = 'labeled') AS labeled_count
+                FROM works w WHERE w.goal_id = ?
+            )
+            ORDER BY created_at DESC, id DESC
             LIMIT ? OFFSET ?
-        """, (goal_id, size, offset))
-        total = db.query_one(
-            "SELECT COUNT(*) AS n FROM contents WHERE goal_id = ?",
-            (goal_id,))["n"]
+        """, (goal_id, goal_id, size, offset))
+        total = db.query_one("""
+            SELECT (SELECT COUNT(*) FROM contents WHERE goal_id = ?)
+                 + (SELECT COUNT(*) FROM works WHERE goal_id = ?) AS n
+        """, (goal_id, goal_id))["n"]
         return _json({"contents": rows, "total": total, "page": page, "size": size})
 
     def _get_content_detail(self, q):
@@ -89,45 +105,63 @@ class LabelerAPI:
             raise ValueError("缺少 goal_id")
         offset = (page - 1) * size
         rows = db.query_all("""
-            SELECT cm.id, cm.comment, cm.score, cm.label,
-                   ct.text AS content_text, ct.id AS content_id
-            FROM comments cm
-            JOIN contents ct ON cm.content_id = ct.id
-            WHERE cm.goal_id = ? AND cm.status = 'labeled'
-            ORDER BY cm.id
-            LIMIT ? OFFSET ?
-        """, (goal_id, size, offset))
+            SELECT * FROM (
+                SELECT cm.id AS id, cm.comment AS comment, cm.score AS score,
+                       cm.label AS label, ct.text AS content_text,
+                       ct.id AS content_id, 'manual' AS source
+                FROM comments cm JOIN contents ct ON cm.content_id = ct.id
+                WHERE cm.goal_id = ? AND cm.status = 'labeled'
+                UNION ALL
+                SELECT a.id AS id, COALESCE(a.comment, '') AS comment,
+                       a.score AS score, a.label AS label,
+                       COALESCE(w.content, w.note_title, '') AS content_text,
+                       w.id AS content_id, 'es' AS source
+                FROM annotations a JOIN works w ON a.work_id = w.id
+                WHERE a.goal_id = ? AND a.status = 'labeled'
+            ) ORDER BY id DESC LIMIT ? OFFSET ?
+        """, (goal_id, goal_id, size, offset))
         total = db.query_one(
-            "SELECT COUNT(*) AS n FROM comments WHERE goal_id = ? AND status = 'labeled'",
-            (goal_id,))["n"]
+            "SELECT (SELECT COUNT(*) FROM comments WHERE goal_id = ? AND status = 'labeled') "
+            "+ (SELECT COUNT(*) FROM annotations WHERE goal_id = ? AND status = 'labeled') AS n",
+            (goal_id, goal_id))["n"]
         return _json({"items": rows, "total": total, "page": page, "size": size})
 
     def _get_stats(self, q):
         goal_id = int(self._q(q, "goal_id", "0"))
         if goal_id <= 0:
             raise ValueError("缺少 goal_id")
+        # 合并 手工(comments) + 外部(annotations) 统计
         total = db.query_one(
-            "SELECT COUNT(*) AS n FROM comments WHERE goal_id = ?",
-            (goal_id,))["n"]
+            "SELECT (SELECT COUNT(*) FROM comments WHERE goal_id = ?) "
+            "+ (SELECT COUNT(*) FROM annotations WHERE goal_id = ?) AS n",
+            (goal_id, goal_id))["n"]
         labeled = db.query_one(
-            "SELECT COUNT(*) AS n FROM comments WHERE goal_id = ? AND status = 'labeled'",
-            (goal_id,))["n"]
-        # 按分数分布
+            "SELECT (SELECT COUNT(*) FROM comments WHERE goal_id = ? AND status = 'labeled') "
+            "+ (SELECT COUNT(*) FROM annotations WHERE goal_id = ? AND status = 'labeled') AS n",
+            (goal_id, goal_id))["n"]
+        unlabeled = db.query_one(
+            "SELECT (SELECT COUNT(*) FROM comments WHERE goal_id = ? AND status = 'pending') "
+            "+ (SELECT COUNT(*) FROM annotations WHERE goal_id = ? AND status = 'pending') AS n",
+            (goal_id, goal_id))["n"]
+        # 按分数分布（手工 + 外部合并）
         score_dist = db.query_all("""
-            SELECT score, COUNT(*) AS count
-            FROM comments
-            WHERE goal_id = ? AND status = 'labeled'
-            GROUP BY score ORDER BY score
-        """, (goal_id,))
+            SELECT score, SUM(cnt) AS count FROM (
+                SELECT score, COUNT(*) AS cnt FROM comments
+                WHERE goal_id = ? AND status = 'labeled' GROUP BY score
+                UNION ALL
+                SELECT score, COUNT(*) AS cnt FROM annotations
+                WHERE goal_id = ? AND status = 'labeled' GROUP BY score
+            ) GROUP BY score ORDER BY score
+        """, (goal_id, goal_id))
         return _json({
             "total": total,
             "labeled": labeled,
-            "unlabeled": total - labeled,
+            "unlabeled": unlabeled,
             "score_distribution": {str(r["score"]): r["count"] for r in score_dist},
         })
 
     def _get_unlabeled(self, q):
-        """获取未标注评论（分页，供快速标注用）。"""
+        """获取未标注评论（分页，供快速标注用）。合并手工(comments) + 外部(annotations)。"""
         goal_id = int(self._q(q, "goal_id", "0"))
         page = int(self._q(q, "page", "1"))
         size = min(int(self._q(q, "size", "20")), 100)
@@ -135,16 +169,24 @@ class LabelerAPI:
             raise ValueError("缺少 goal_id")
         offset = (page - 1) * size
         rows = db.query_all("""
-            SELECT cm.id, cm.comment, cm.content_id, ct.text AS content_text
-            FROM comments cm
-            JOIN contents ct ON cm.content_id = ct.id
-            WHERE cm.goal_id = ? AND cm.status = 'pending'
-            ORDER BY cm.id
-            LIMIT ? OFFSET ?
-        """, (goal_id, size, offset))
-        total = db.query_one(
-            "SELECT COUNT(*) AS n FROM comments WHERE goal_id = ? AND status = 'pending'",
-            (goal_id,))["n"]
+            SELECT * FROM (
+                SELECT cm.id AS id, 'manual' AS source,
+                       cm.comment AS comment, cm.raw_score AS raw_score,
+                       ct.text AS content_text
+                FROM comments cm JOIN contents ct ON cm.content_id = ct.id
+                WHERE cm.goal_id = ? AND cm.status = 'pending'
+                UNION ALL
+                SELECT a.id AS id, 'es' AS source,
+                       COALESCE(a.comment, '') AS comment, a.raw_score AS raw_score,
+                       COALESCE(w.content, w.note_title, '') AS content_text
+                FROM annotations a JOIN works w ON a.work_id = w.id
+                WHERE a.goal_id = ? AND a.status = 'pending'
+            ) ORDER BY id DESC LIMIT ? OFFSET ?
+        """, (goal_id, goal_id, size, offset))
+        total = db.query_one("""
+            SELECT (SELECT COUNT(*) FROM comments WHERE goal_id = ? AND status = 'pending')
+                 + (SELECT COUNT(*) FROM annotations WHERE goal_id = ? AND status = 'pending') AS n
+        """, (goal_id, goal_id))["n"]
         return _json({"items": rows, "total": total, "page": page, "size": size})
 
     # ---- POST ----

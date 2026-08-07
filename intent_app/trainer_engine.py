@@ -4,11 +4,7 @@
 # Licensed under the MIT License. See LICENSE for details.
 """训练引擎 — 后台线程运行 RoBERTa-wwm-ext 微调，支持指标/ETA/控制/导出。
 
-状态机：idle → running → done/stopped/error
-
-ML 依赖（torch / transformers / optimum / onnxruntime）均为延迟导入：
-  - 服务器启动时不需要安装 ML 依赖
-  - 仅在实际开始训练时才 import
+状态机：idle → running → done/stopped/error；ML 依赖延迟导入（仅训练时才 import）。
 """
 import json
 import os
@@ -71,11 +67,17 @@ class TrainerEngine:
 
     # ---- 训练控制 ----
 
-    def start(self, goal_id, goal_name, hyperparams):
-        """启动训练（后台线程）。"""
+    def start(self, goal_id, goal_name, hyperparams, label_source="labeled"):
+        """启动训练（后台线程）。
+
+        label_source: 'labeled' 用人工标注（手工+外部已标注）；
+                      'raw' 用 ES 原始得分 raw_score 作伪标签（只读，不改数据）。
+        """
         import threading
         if self.state in ("running",):
             raise ValueError(f"训练状态为 {self.state}，无法重复开始")
+        if label_source not in ("labeled", "raw"):
+            raise ValueError("label_source 必须为 labeled 或 raw")
         self.goal_id = goal_id
         self.goal_name = goal_name
         self.state = "running"
@@ -87,7 +89,7 @@ class TrainerEngine:
         self.final_acc = None
         self.last_model_dir = None
         self.thread = threading.Thread(
-            target=self._run, args=(goal_id, goal_name, hyperparams),
+            target=self._run, args=(goal_id, goal_name, hyperparams, label_source),
             daemon=True)
         self.thread.start()
         return True
@@ -102,7 +104,7 @@ class TrainerEngine:
 
     # ---- 训练主循环 ----
 
-    def _run(self, goal_id, goal_name, hyperparams):
+    def _run(self, goal_id, goal_name, hyperparams, label_source="labeled"):
         """训练线程主体。延迟导入所有 ML 依赖。"""
         try:
             import torch
@@ -129,14 +131,31 @@ class TrainerEngine:
 
         try:
             # ---- 1. 加载标注数据 ----
-            self._log("正在加载标注数据...")
-            rows = db.query_all("""
-                SELECT cm.comment, cm.score, ct.text AS content_text
-                FROM comments cm
-                JOIN contents ct ON cm.content_id = ct.id
-                WHERE cm.goal_id = ? AND cm.status = 'labeled'
-                ORDER BY cm.id
-            """, (goal_id,))
+            # label_source='raw'：只读 ES 原始得分 raw_score 作伪标签，不改数据
+            if label_source == "raw":
+                self._log("正在加载 ES 原始得分(raw_score)作为训练标签...")
+                rows = db.query_all("""
+                    SELECT a.comment AS comment, a.raw_score AS score,
+                           COALESCE(w.content, w.note_title, '') AS content_text
+                    FROM annotations a JOIN works w ON a.work_id = w.id
+                    WHERE a.goal_id = ? AND a.raw_score IS NOT NULL
+                    ORDER BY a.id
+                """, (goal_id,))
+            else:
+                self._log("正在加载标注数据（人工标注，手工+外部合并）...")
+                rows = db.query_all("""
+                    SELECT * FROM (
+                        SELECT cm.comment AS comment, cm.score AS score,
+                               ct.text AS content_text
+                        FROM comments cm JOIN contents ct ON cm.content_id = ct.id
+                        WHERE cm.goal_id = ? AND cm.status = 'labeled'
+                        UNION ALL
+                        SELECT COALESCE(a.comment, '') AS comment, a.score AS score,
+                               COALESCE(w.content, w.note_title, '') AS content_text
+                        FROM annotations a JOIN works w ON a.work_id = w.id
+                        WHERE a.goal_id = ? AND a.status = 'labeled'
+                    ) ORDER BY comment
+                """, (goal_id, goal_id))
 
             if len(rows) < 20:
                 raise ValueError(f"标注数据不足: {len(rows)} 条，至少需要 20 条")
@@ -149,7 +168,9 @@ class TrainerEngine:
             if len(score_counts) < 2:
                 raise ValueError(f"标注数据只有 {len(score_counts)} 种分数，至少需要 2 种")
 
-            self._log(f"标注数据: {len(rows)} 条, 分数分布: {score_counts}")
+            src_label = "ES原始得分(raw_score)" if label_source == "raw" else "人工标注"
+            self._log(f"训练标签来源: {src_label}, 数据: {len(rows)} 条, "
+                      f"分数分布: {score_counts}")
 
             # ---- 2. 切分训练/验证 ----
             import random
@@ -315,18 +336,22 @@ class TrainerEngine:
                     "weight_decay": weight_decay,
                     "val_ratio": val_ratio,
                     "pretrained_model": PRETRAINED_MODEL,
+                    "label_source": label_source,
                 }, ensure_ascii=False)
+                # 可读命名：{来源}_{epochs}ep_acc_{acc 4位小数}，来源 raw=ES原始得分 / manual=人工标注
+                src = "manual" if label_source == "labeled" else "raw"
+                model_name = f"{src}_{epochs}ep_acc_{best_val_acc:.4f}"
                 model_id = db.execute("""
-                    INSERT INTO models (goal_id, onnx_path, tokenizer_dir, accuracy,
+                    INSERT INTO models (goal_id, name, onnx_path, tokenizer_dir, accuracy,
                                         num_train_samples, status, params)
-                    VALUES (?, ?, ?, ?, ?, 'trained', ?)
-                """, (goal_id,
+                    VALUES (?, ?, ?, ?, ?, ?, 'trained', ?)
+                """, (goal_id, model_name,
                       os.path.join(rel_path, "model_int8.onnx"),
                       rel_path,
                       best_val_acc,
                       num_samples,
                       params_json))
-                self._log(f"模型记录已保存到数据库 (id={model_id})")
+                self._log(f"模型记录已保存到数据库 (id={model_id}, name={model_name})")
 
         except Exception as e:
             import traceback
@@ -359,7 +384,6 @@ class TrainerEngine:
     def _export_onnx(self, model, tokenizer, goal_id, goal_name, acc, hyperparams):
         """导出 ONNX 模型 + INT8 量化。"""
         import torch
-        from optimum.onnxruntime import ORTModelForSequenceClassification
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_name = "".join(c if c.isalnum() or c in "._-" else "_"
@@ -372,6 +396,7 @@ class TrainerEngine:
 
         # 导出 ONNX (FP32)
         try:
+            from optimum.onnxruntime import ORTModelForSequenceClassification
             ort_model = ORTModelForSequenceClassification.from_pretrained(
                 model, export=True, provider="CPUExecutionProvider")
             ort_model.save_pretrained(model_dir)
@@ -383,16 +408,24 @@ class TrainerEngine:
         onnx_path = os.path.join(model_dir, "model.onnx")
         int8_path = os.path.join(model_dir, "model_int8.onnx")
 
-        # INT8 动态量化
+        # INT8 动态量化（torch 导出图带冲突 value_info，先清空；per_channel 质量优于 per_tensor）
         if os.path.isfile(onnx_path):
             try:
+                import onnx
                 from onnxruntime.quantization import quantize_dynamic, QuantType
-                quantize_dynamic(onnx_path, int8_path, weight_type=QuantType.QInt8)
+                m = onnx.load(onnx_path)
+                del m.graph.value_info[:]
+                clean = onnx_path + ".clean"
+                onnx.save(m, clean, save_as_external_data=True,
+                          all_tensors_to_one_file=True,
+                          location=os.path.basename(clean) + ".data")
+                quantize_dynamic(clean, int8_path, weight_type=QuantType.QInt8, per_channel=True,
+                                 extra_options={"MatMulConstBOnly": False})
+                os.remove(clean); os.remove(clean + ".data")
                 self._log("INT8 量化完成")
             except Exception as e:
                 self._log(f"INT8 量化失败，使用 FP32: {e}")
-                import shutil
-                shutil.copy2(onnx_path, int8_path)
+                import shutil; shutil.copy2(onnx_path, int8_path)
 
         # 保存训练配置
         config = {
