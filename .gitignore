@@ -219,3 +219,6 @@ __marimo__/
 
 # WorkBuddy
 .workbuddy/
+
+# 研发日记（不提交到 github）
+docs/devlog/

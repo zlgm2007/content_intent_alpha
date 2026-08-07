@@ -34,15 +34,24 @@ class IntentAPI:
     def _get_list(self, q):
         rows = db.query_all("""
             SELECT g.*,
-                   (SELECT COUNT(*) FROM contents WHERE goal_id = g.id)       AS content_count,
-                   (SELECT COUNT(*) FROM comments WHERE goal_id = g.id)       AS comment_count,
+                   (SELECT COUNT(*) FROM contents WHERE goal_id = g.id) AS content_count,
+                   (SELECT COUNT(*) FROM works WHERE goal_id = g.id) AS es_work_count,
+                   (SELECT COUNT(*) FROM comments WHERE goal_id = g.id) AS comment_count,
+                   (SELECT COUNT(*) FROM annotations WHERE goal_id = g.id) AS es_comment_count,
                    (SELECT COUNT(*) FROM comments WHERE goal_id = g.id
-                    AND status = 'labeled')                                    AS labeled_count,
+                    AND status = 'labeled') AS labeled_count,
+                   (SELECT COUNT(*) FROM annotations WHERE goal_id = g.id
+                    AND status = 'labeled') AS es_labeled_count,
                    (SELECT COUNT(*) FROM models WHERE goal_id = g.id
-                    AND status = 'trained')                                    AS model_count
+                    AND status = 'trained') AS model_count
             FROM intent_goals g
             ORDER BY g.id DESC
         """)
+        # 合并总数 = 手工 + 外部(ES)
+        for r in rows:
+            r["work_total"] = r["content_count"] + r["es_work_count"]
+            r["comment_total"] = r["comment_count"] + r["es_comment_count"]
+            r["labeled_total"] = r["labeled_count"] + r["es_labeled_count"]
         return _json({"goals": rows})
 
     def _get_detail(self, q):
@@ -54,11 +63,17 @@ class IntentAPI:
             raise ValueError("意图目标不存在")
         stats = db.query_one("""
             SELECT
-                (SELECT COUNT(*) FROM contents WHERE goal_id = ?)       AS content_count,
-                (SELECT COUNT(*) FROM comments WHERE goal_id = ?)       AS comment_count,
+                (SELECT COUNT(*) FROM contents WHERE goal_id = ?) AS content_count,
+                (SELECT COUNT(*) FROM works WHERE goal_id = ?) AS es_work_count,
+                (SELECT COUNT(*) FROM comments WHERE goal_id = ?) AS comment_count,
+                (SELECT COUNT(*) FROM annotations WHERE goal_id = ?) AS es_comment_count,
                 (SELECT COUNT(*) FROM comments WHERE goal_id = ? AND status = 'labeled') AS labeled_count,
-                (SELECT COUNT(*) FROM models WHERE goal_id = ? AND status = 'trained')   AS model_count
-        """, (goal_id, goal_id, goal_id, goal_id))
+                (SELECT COUNT(*) FROM annotations WHERE goal_id = ? AND status = 'labeled') AS es_labeled_count,
+                (SELECT COUNT(*) FROM models WHERE goal_id = ? AND status = 'trained') AS model_count
+        """, (goal_id, goal_id, goal_id, goal_id, goal_id, goal_id, goal_id))
+        stats["work_total"] = stats["content_count"] + stats["es_work_count"]
+        stats["comment_total"] = stats["comment_count"] + stats["es_comment_count"]
+        stats["labeled_total"] = stats["labeled_count"] + stats["es_labeled_count"]
         goal.update(stats)
         return _json(goal)
 

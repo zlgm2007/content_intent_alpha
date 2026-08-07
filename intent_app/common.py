@@ -23,6 +23,18 @@ MODELS_DIR = os.path.join(REPO_DIR, "models")           # ONNX 模型输出目�
 PRETRAINED_MODEL = "hfl/chinese-roberta-wwm-ext"
 NUM_LABELS = 6  # 0-5 分，6 分类
 
+# 外部平台数据同步（Elasticsearch）
+ES_BASE_URL = os.environ.get("ES_BASE_URL", "http://10.104.214.120:9200")
+ES_INDICES = {"ge3": "lead_clue_score_ge3", "lt3": "lead_clue_score_lt3"}
+ES_DEFAULT_DAYS = 1        # 按天数同步：默认最近 N 天
+ES_MIN_DAYS = 1            # 最少 1 天
+ES_MAX_DAYS = 30           # 最多 30 天
+ES_DEFAULT_LIMIT = 10000   # 按条数同步：默认最近 N 条
+ES_MIN_LIMIT = 1           # 最少 1 条
+ES_MAX_LIMIT = 100000      # 最多 10 万条
+ES_SCROLL_KEEP = "1m"      # scroll 上下文保留时间
+ES_PAGE_SIZE = 1000        # 每次 scroll 拉取条数
+
 
 def ensure_dirs():
     """确保关键目录存在。"""

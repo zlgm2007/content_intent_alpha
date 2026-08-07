@@ -60,27 +60,49 @@ class TrainerAPI:
         goal_id = int(self._q(q, "goal_id", "0"))
         if goal_id <= 0:
             raise ValueError("缺少 goal_id")
+        # 合并 手工(comments) + 外部(annotations) 统计
         total = db.query_one(
-            "SELECT COUNT(*) AS n FROM comments WHERE goal_id = ?", (goal_id,))["n"]
+            "SELECT (SELECT COUNT(*) FROM comments WHERE goal_id = ?) "
+            "+ (SELECT COUNT(*) FROM annotations WHERE goal_id = ?) AS n",
+            (goal_id, goal_id))["n"]
         labeled = db.query_one(
-            "SELECT COUNT(*) AS n FROM comments WHERE goal_id = ? AND status = 'labeled'",
-            (goal_id,))["n"]
+            "SELECT (SELECT COUNT(*) FROM comments WHERE goal_id = ? AND status = 'labeled') "
+            "+ (SELECT COUNT(*) FROM annotations WHERE goal_id = ? AND status = 'labeled') AS n",
+            (goal_id, goal_id))["n"]
+        auto_labeled = db.query_one(
+            "SELECT (SELECT COUNT(*) FROM comments WHERE goal_id = ? AND auto_labeled = 1) "
+            "+ (SELECT COUNT(*) FROM annotations WHERE goal_id = ? AND auto_labeled = 1) AS n",
+            (goal_id, goal_id))["n"]
+        unlabeled = db.query_one(
+            "SELECT (SELECT COUNT(*) FROM comments WHERE goal_id = ? AND status = 'pending') "
+            "+ (SELECT COUNT(*) FROM annotations WHERE goal_id = ? AND status = 'pending') AS n",
+            (goal_id, goal_id))["n"]
         score_dist = db.query_all("""
-            SELECT score, COUNT(*) AS count
-            FROM comments
-            WHERE goal_id = ? AND status = 'labeled'
-            GROUP BY score ORDER BY score
-        """, (goal_id,))
+            SELECT score, SUM(cnt) AS count FROM (
+                SELECT score, COUNT(*) AS cnt FROM comments
+                WHERE goal_id = ? AND status = 'labeled' GROUP BY score
+                UNION ALL
+                SELECT score, COUNT(*) AS cnt FROM annotations
+                WHERE goal_id = ? AND status = 'labeled' GROUP BY score
+            ) GROUP BY score ORDER BY score
+        """, (goal_id, goal_id))
         has_intent = sum(r["count"] for r in score_dist if r["score"] >= 3)
         no_intent = sum(r["count"] for r in score_dist if r["score"] < 3)
+        # ES 原始得分可作伪标签的条数（只读训练用）
+        raw_available = db.query_one(
+            "SELECT COUNT(*) AS n FROM annotations "
+            "WHERE goal_id = ? AND raw_score IS NOT NULL", (goal_id,))["n"]
         return _json({
             "total_comments": total,
             "labeled": labeled,
-            "unlabeled": total - labeled,
+            "unlabeled": unlabeled,
+            "auto_labeled": auto_labeled,
             "has_intent": has_intent,
             "no_intent": no_intent,
             "score_distribution": {str(r["score"]): r["count"] for r in score_dist},
             "ready": labeled >= 20,
+            "raw_available": raw_available,
+            "ready_raw": raw_available >= 20,
         })
 
     # ---- POST ----
@@ -99,16 +121,27 @@ class TrainerAPI:
         if not goal:
             raise ValueError("意图目标不存在")
 
-        # 检查数据量
-        labeled_count = db.query_one(
-            "SELECT COUNT(*) AS n FROM comments WHERE goal_id = ? AND status = 'labeled'",
-            (goal_id,))["n"]
-        if labeled_count < 20:
-            raise ValueError(f"标注数据不足: {labeled_count} 条，至少需要 20 条")
+        label_source = body.get("label_source", "labeled")
+        if label_source not in ("labeled", "raw"):
+            raise ValueError("label_source 必须为 labeled 或 raw")
+
+        # 检查数据量：labeled=人工标注合并，raw=ES 原始得分伪标签
+        if label_source == "raw":
+            data_count = db.query_one(
+                "SELECT COUNT(*) AS n FROM annotations "
+                "WHERE goal_id = ? AND raw_score IS NOT NULL", (goal_id,))["n"]
+        else:
+            data_count = db.query_one(
+                "SELECT (SELECT COUNT(*) FROM comments WHERE goal_id = ? AND status = 'labeled') "
+                "+ (SELECT COUNT(*) FROM annotations WHERE goal_id = ? AND status = 'labeled') AS n",
+                (goal_id, goal_id))["n"]
+        if data_count < 20:
+            raise ValueError(f"标注数据不足: {data_count} 条，至少需要 20 条")
 
         hyperparams = body.get("hyperparams") or {}
-        self.engine.start(goal_id, goal["name"], hyperparams)
-        return _json({"ok": True, "goal_id": goal_id, "goal_name": goal["name"]})
+        self.engine.start(goal_id, goal["name"], hyperparams, label_source)
+        return _json({"ok": True, "goal_id": goal_id, "goal_name": goal["name"],
+                      "label_source": label_source})
 
     def _post_stop(self, body):
         self.engine.stop()

@@ -23,6 +23,7 @@
   .stat { display: inline-block; background: #ddf4ff; color: #0969da; padding: 2px 8px; border-radius: 10px; font-size: 12px; margin-right: 4px; }
   .stat.warn { background: #fff8c5; color: #9a6700; }
   .stat.ok { background: #dafbe1; color: #1a7f37; }
+  .ext { font-size: 11px; color: #8a9199; margin-left: 6px; white-space: nowrap; }
   .empty { text-align: center; padding: 40px; color: #656d76; }
   .actions { display: flex; gap: 8px; }
 </style>
@@ -46,7 +47,8 @@
 </div>
 
 <div class="card">
-  <h3 style="font-size:15px; margin-bottom:12px;">意图目标列表</h3>
+  <h3 style="font-size:15px; margin-bottom:8px;">意图目标列表</h3>
+  <p style="font-size:12px; color:#656d76; margin-bottom:12px;">统计口径：总数为 手工 + 外部(ES) 合并；列内右侧小字为 手工/外部 拆分。</p>
   <div id="goalList"><div class="empty">加载中...</div></div>
 </div>
 
@@ -73,9 +75,9 @@ async function loadGoals() {
       <td>${g.id}</td>
       <td><b>${esc(g.name)}</b></td>
       <td>${esc(g.description || '')}</td>
-      <td><span class="stat">${g.content_count}</span></td>
-      <td><span class="stat">${g.comment_count}</span></td>
-      <td><span class="stat ${g.labeled_count >= 20 ? 'ok' : 'warn'}">${g.labeled_count}</span></td>
+      <td><span class="stat">${g.work_total}</span><small class="ext" title="手工/外部 作品数">${g.content_count}/${g.es_work_count}</small></td>
+      <td><span class="stat">${g.comment_total}</span><small class="ext" title="手工/外部 评论数">${g.comment_count}/${g.es_comment_count}</small></td>
+      <td><span class="stat ${g.labeled_total >= 20 ? 'ok' : 'warn'}">${g.labeled_total}</span><small class="ext" title="手工/外部 已标注">${g.labeled_count}/${g.es_labeled_count}</small></td>
       <td><span class="stat">${g.model_count}</span></td>
       <td><div class="actions">
         <button class="btn btn-sm btn-primary" onclick="editGoal(${g.id}, '${esc(g.name)}', '${esc(g.description||'')}')">编辑</button>

@@ -84,6 +84,12 @@
   <div class="card">
     <h3>训练参数</h3>
     <div class="row">
+      <div class="field"><label>训练标签来源</label>
+        <select id="labelSource" onchange="updateTrainReady()">
+          <option value="labeled">人工标注</option>
+          <option value="raw">ES原始得分(raw_score)</option>
+        </select>
+      </div>
       <div class="field"><label>学习率</label><input id="hpLr" type="number" value="0.00002" step="0.00001"></div>
       <div class="field"><label>Batch Size</label><input id="hpBs" type="number" value="16" step="1"></div>
       <div class="field"><label>Epochs</label><input id="hpEp" type="number" value="3" step="1"></div>
@@ -160,6 +166,7 @@
 <script>
 let currentGoalId = null;
 let pollTimer = null;
+let _trainStats = null;
 
 async function api(path, opts={}) {
   const res = await fetch(path, { headers: {'Content-Type':'application/json'}, ...opts });
@@ -207,11 +214,24 @@ async function loadDataStats() {
   document.getElementById('dsDist').innerHTML = Object.entries(dist).map(([s,c]) =>
     `<span class="stat ${parseInt(s)>=3?'green':'gray'}">${s}分: ${c}</span>`
   ).join(' ');
-  const ready = data.ready;
-  document.getElementById('dsReady').innerHTML = ready
-    ? '<span class="stat green">数据就绪，可以训练</span>'
-    : `<span class="stat red">标注数据不足 20 条（当前 ${data.labeled} 条），请继续标注</span>`;
-  document.getElementById('btnStart').disabled = !ready;
+  _trainStats = data;
+  updateTrainReady();
+}
+
+// 按训练标签来源刷新就绪提示与开始按钮
+function updateTrainReady() {
+  const st = _trainStats || {};
+  if (document.getElementById('labelSource').value === 'raw') {
+    document.getElementById('dsReady').innerHTML = st.ready_raw
+      ? `<span class="stat green">ES原始得分可用 ${st.raw_available} 条，可以训练</span>`
+      : `<span class="stat red">ES原始得分不足 20 条（当前 ${st.raw_available||0} 条）</span>`;
+    document.getElementById('btnStart').disabled = !st.ready_raw;
+  } else {
+    document.getElementById('dsReady').innerHTML = st.ready
+      ? '<span class="stat green">数据就绪，可以训练</span>'
+      : `<span class="stat red">标注数据不足 20 条（当前 ${st.labeled} 条），请继续标注</span>`;
+    document.getElementById('btnStart').disabled = !st.ready;
+  }
 }
 
 // ---- Tab 切换 ----
@@ -232,8 +252,11 @@ async function startTrain() {
     max_length: parseInt(document.getElementById('hpMl').value),
     val_ratio: parseFloat(document.getElementById('hpVr').value),
   };
+  const label_source = document.getElementById('labelSource').value;
   const data = await api('/train/api/start', {
-    method:'POST', body: JSON.stringify({goal_id: parseInt(currentGoalId), hyperparams: hp})
+    method:'POST', body: JSON.stringify({
+      goal_id: parseInt(currentGoalId), hyperparams: hp, label_source
+    })
   });
   if (data.error) { alert(data.error); return; }
   document.getElementById('btnStart').disabled = true;
@@ -375,12 +398,13 @@ async function loadModels() {
     return;
   }
   el.innerHTML = '<table><thead><tr>' +
-    '<th>ID</th><th>准确率</th><th>训练数据</th><th>参数</th><th>ONNX</th><th>创建时间</th><th>操作</th>' +
+    '<th>ID</th><th>名称</th><th>准确率</th><th>训练数据</th><th>参数</th><th>ONNX</th><th>创建时间</th><th>操作</th>' +
     '</tr></thead><tbody>' + data.models.map(m => {
     const p = m.params || {};
     return `
     <tr>
       <td>${m.id}</td>
+      <td>${esc(m.name||'-')}</td>
       <td><span class="stat ${m.accuracy>=0.8?'green':m.accuracy>=0.6?'yellow':'red'}">${(m.accuracy*100).toFixed(1)}%</span></td>
       <td>${m.num_train_samples || '-'} 条</td>
       <td style="font-size:11px; color:#656d76;">lr=${p.learning_rate||'-'} bs=${p.batch_size||'-'} ep=${p.epochs||'-'}</td>
@@ -398,7 +422,7 @@ async function loadPredictModels() {
   const sel = document.getElementById('predictModelSelect');
   sel.innerHTML = '<option value="">-- 请选择 --</option>' +
     (data.models||[]).filter(m => m.onnx_exists).map(m =>
-      `<option value="${m.id}">#${m.id} (${(m.accuracy*100).toFixed(1)}%)</option>`
+      `<option value="${m.id}">#${m.id} ${esc(m.name||'')}</option>`
     ).join('');
 }
 
