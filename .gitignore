@@ -222,3 +222,13 @@ __marimo__/
 
 # 研发日记（不提交到 github）
 docs/devlog/
+
+# draw.io 备份/临时文件（不提交）
+*.drawio.bkp
+*.drawio.dtmp
+
+# macOS 系统文件（不提交）
+.DS_Store
+
+# 模型权重（大文件，不提交 git，保留本地磁盘）
+*.onnx.data
