@@ -169,6 +169,8 @@ _MIGRATE_COLUMNS = [
     ("annotations", "auto_labeled", "INTEGER"),
     ("sync_batches", "sync_limit", "INTEGER"),
     ("models", "name", "TEXT"),
+    ("intent_goals", "score_definitions", "TEXT"),    # JSON: 分数定义数组
+    ("intent_goals", "intent_threshold", "INTEGER"),  # 意图阈值，>=此值为有意图
 ]
 
 

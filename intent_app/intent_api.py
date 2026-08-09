@@ -52,6 +52,7 @@ class IntentAPI:
             r["work_total"] = r["content_count"] + r["es_work_count"]
             r["comment_total"] = r["comment_count"] + r["es_comment_count"]
             r["labeled_total"] = r["labeled_count"] + r["es_labeled_count"]
+            r["score_definitions"] = json.loads(r["score_definitions"]) if r.get("score_definitions") else None
         return _json({"goals": rows})
 
     def _get_detail(self, q):
@@ -75,6 +76,7 @@ class IntentAPI:
         stats["comment_total"] = stats["comment_count"] + stats["es_comment_count"]
         stats["labeled_total"] = stats["labeled_count"] + stats["es_labeled_count"]
         goal.update(stats)
+        goal["score_definitions"] = json.loads(goal["score_definitions"]) if goal.get("score_definitions") else None
         return _json(goal)
 
     # ---- POST ----
@@ -90,13 +92,22 @@ class IntentAPI:
         if not name:
             raise ValueError("意图名称不能为空")
         desc = str(body.get("description", "")).strip()
+        # 分数定义
+        score_defs = body.get("score_definitions")
+        defs_json = None
+        if score_defs:
+            if not isinstance(score_defs, list) or len(score_defs) < 2:
+                raise ValueError("score_definitions 至少需要 2 个分数定义")
+            defs_json = json.dumps(score_defs, ensure_ascii=False)
+        # 意图阈值
+        threshold = body.get("intent_threshold")
         # 检查重名
         existing = db.query_one("SELECT id FROM intent_goals WHERE name = ?", (name,))
         if existing:
             raise ValueError(f"意图目标已存在: {name}")
         gid = db.execute(
-            "INSERT INTO intent_goals (name, description) VALUES (?, ?)",
-            (name, desc))
+            "INSERT INTO intent_goals (name, description, score_definitions, intent_threshold) VALUES (?, ?, ?, ?)",
+            (name, desc, defs_json, threshold))
         goal = db.query_one("SELECT * FROM intent_goals WHERE id = ?", (gid,))
         return _json({"ok": True, "goal": goal})
 
@@ -106,19 +117,41 @@ class IntentAPI:
             raise ValueError("缺少 id")
         name = str(body.get("name", "")).strip()
         desc = str(body.get("description", "")).strip()
+
+        # 构建动态 SET 子句
+        sets = []
+        params = []
         if name:
             dup = db.query_one(
                 "SELECT id FROM intent_goals WHERE name = ? AND id != ?",
                 (name, goal_id))
             if dup:
                 raise ValueError(f"意图名称已被使用: {name}")
-            db.execute(
-                "UPDATE intent_goals SET name = ?, description = ? WHERE id = ?",
-                (name, desc, goal_id))
-        else:
-            db.execute(
-                "UPDATE intent_goals SET description = ? WHERE id = ?",
-                (desc, goal_id))
+            sets.append("name = ?")
+            params.append(name)
+        sets.append("description = ?")
+        params.append(desc)
+
+        # 分数定义
+        if "score_definitions" in body:
+            score_defs = body.get("score_definitions")
+            if score_defs:
+                if not isinstance(score_defs, list) or len(score_defs) < 2:
+                    raise ValueError("score_definitions 至少需要 2 个分数定义")
+                sets.append("score_definitions = ?")
+                params.append(json.dumps(score_defs, ensure_ascii=False))
+            else:
+                sets.append("score_definitions = NULL")
+        # 意图阈值
+        if "intent_threshold" in body:
+            threshold = body.get("intent_threshold")
+            sets.append("intent_threshold = ?")
+            params.append(threshold)
+
+        params.append(goal_id)
+        db.execute(
+            f"UPDATE intent_goals SET {', '.join(sets)} WHERE id = ?",
+            tuple(params))
         goal = db.query_one("SELECT * FROM intent_goals WHERE id = ?", (goal_id,))
         return _json({"ok": True, "goal": goal})
 

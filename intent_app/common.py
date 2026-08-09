@@ -9,6 +9,7 @@
 """
 import os
 import sys
+import json
 
 # 仓库根 = intent_app/common.py 的上两级
 REPO_DIR = os.path.abspath(os.path.join(
@@ -21,7 +22,62 @@ MODELS_DIR = os.path.join(REPO_DIR, "models")           # ONNX 模型输出目�
 
 # 预训练模型标识
 PRETRAINED_MODEL = "hfl/chinese-roberta-wwm-ext"
-NUM_LABELS = 6  # 0-5 分，6 分类
+NUM_LABELS = 6  # 默认 0-5 分；实际 num_labels 由各 goal 的 score_definitions 决定
+
+# 默认分数定义（score_definitions 为 NULL 时使用）
+DEFAULT_SCORE_DEFINITIONS = [
+    {"score": 0, "label": "无关", "desc": "评论与意图完全无关"},
+    {"score": 1, "label": "弱关联", "desc": "提到相关话题但无意图"},
+    {"score": 2, "label": "有关注", "desc": "对相关内容有兴趣但未明确表达"},
+    {"score": 3, "label": "有倾向", "desc": "有一定意图倾向"},
+    {"score": 4, "label": "明确意向", "desc": "明确表达意图"},
+    {"score": 5, "label": "强烈意向", "desc": "意图非常强烈"},
+]
+DEFAULT_THRESHOLD = 3  # 默认阈值：>=3 为有意图
+
+
+def get_goal_score_config(goal_id):
+    """获取某意图目标的分数配置。
+
+    Returns:
+        dict: {
+            "max_score": int,          # 最大分数值
+            "num_labels": int,         # 分类数 = max_score + 1
+            "threshold": int,          # 意图阈值，>= 此值为有意图
+            "score_definitions": list, # 分数定义列表 [{score, label, desc}]
+        }
+    """
+    import db
+    goal = db.query_one(
+        "SELECT score_definitions, intent_threshold FROM intent_goals WHERE id = ?",
+        (goal_id,))
+    if not goal:
+        return {"max_score": 5, "num_labels": 6,
+                "threshold": DEFAULT_THRESHOLD,
+                "score_definitions": DEFAULT_SCORE_DEFINITIONS}
+
+    defs = None
+    raw = goal.get("score_definitions")
+    if raw:
+        try:
+            defs = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    if defs and isinstance(defs, list) and len(defs) >= 2:
+        max_score = max(d["score"] for d in defs if isinstance(d.get("score"), int))
+        num_labels = max_score + 1
+    else:
+        defs = DEFAULT_SCORE_DEFINITIONS
+        max_score = 5
+        num_labels = 6
+
+    threshold = goal.get("intent_threshold")
+    if threshold is None:
+        threshold = (max_score + 1) // 2  # ceil(max_score / 2)
+
+    return {"max_score": max_score, "num_labels": num_labels,
+            "threshold": threshold, "score_definitions": defs}
 
 # 外部平台数据同步（Elasticsearch）
 ES_BASE_URL = os.environ.get("ES_BASE_URL", "http://10.104.214.120:9200")

@@ -14,9 +14,7 @@ import json
 import os
 
 import db
-from common import REPO_DIR
-
-SCORE_THRESHOLD = 3
+from common import REPO_DIR, get_goal_score_config
 
 
 def _json(obj):
@@ -78,6 +76,16 @@ class BatchAPI:
         model_id = int(self._q(q, "model_id", "0"))
         if model_id <= 0:
             raise ValueError("缺少 model_id")
+
+        # 获取模型和分数配置
+        model = db.query_one("SELECT * FROM models WHERE id = ?", (model_id,))
+        if not model:
+            raise ValueError("模型不存在")
+        score_cfg = get_goal_score_config(model["goal_id"])
+        max_score = score_cfg["max_score"]
+        threshold = score_cfg["threshold"]
+        num_labels = max_score + 1
+
         rows = db.query_all(
             "SELECT * FROM batch_results WHERE model_id = ?", (model_id,))
         if not rows:
@@ -87,12 +95,7 @@ class BatchAPI:
         correct = sum(1 for r in rows if r["is_correct"])
         accuracy = correct / total if total > 0 else 0
 
-        # 混淆矩阵 (6x6)
-        confusion = [[0] * 6 for _ in range(6)]
-        for r in rows:
-            true_s = r["comment_id"]  # 这里用 stored true score
-            # 需要从 comments 表获取 true_score，这里 rows 已经 join 了
-        # 重新查询带 true_score 的完整数据
+        # 查询带 true_score 的完整数据
         full_rows = db.query_all("""
             SELECT br.predicted_score, br.is_correct, cm.score AS true_score
             FROM batch_results br
@@ -100,22 +103,23 @@ class BatchAPI:
             WHERE br.model_id = ?
         """, (model_id,))
 
-        confusion = [[0] * 6 for _ in range(6)]
+        # 混淆矩阵 (动态大小)
+        confusion = [[0] * num_labels for _ in range(num_labels)]
         for r in full_rows:
             t = r["true_score"]
             p = r["predicted_score"]
-            if t is not None and p is not None and 0 <= t <= 5 and 0 <= p <= 5:
+            if t is not None and p is not None and 0 <= t <= max_score and 0 <= p <= max_score:
                 confusion[t][p] += 1
 
-        # 二分类指标 (>=3 = has_intent)
+        # 二分类指标 (>=threshold = has_intent)
         tp = sum(1 for r in full_rows
-                 if r["true_score"] >= SCORE_THRESHOLD and r["predicted_score"] >= SCORE_THRESHOLD)
+                 if r["true_score"] >= threshold and r["predicted_score"] >= threshold)
         fp = sum(1 for r in full_rows
-                 if r["true_score"] < SCORE_THRESHOLD and r["predicted_score"] >= SCORE_THRESHOLD)
+                 if r["true_score"] < threshold and r["predicted_score"] >= threshold)
         fn = sum(1 for r in full_rows
-                 if r["true_score"] >= SCORE_THRESHOLD and r["predicted_score"] < SCORE_THRESHOLD)
+                 if r["true_score"] >= threshold and r["predicted_score"] < threshold)
         tn = sum(1 for r in full_rows
-                 if r["true_score"] < SCORE_THRESHOLD and r["predicted_score"] < SCORE_THRESHOLD)
+                 if r["true_score"] < threshold and r["predicted_score"] < threshold)
 
         binary_acc = (tp + tn) / total if total > 0 else 0
         precision = tp / (tp + fp) if (tp + fp) > 0 else 0
@@ -124,7 +128,7 @@ class BatchAPI:
 
         # 按分数段统计
         score_stats = {}
-        for score in range(6):
+        for score in range(num_labels):
             score_rows = [r for r in full_rows if r["true_score"] == score]
             if score_rows:
                 s_correct = sum(1 for r in score_rows if r["predicted_score"] == score)
@@ -134,10 +138,9 @@ class BatchAPI:
                     "accuracy": round(s_correct / len(score_rows), 4),
                 }
 
-        model = db.query_one("SELECT * FROM models WHERE id = ?", (model_id,))
         goal = db.query_one(
             "SELECT name FROM intent_goals WHERE id = ?",
-            (model["goal_id"],)) if model else None
+            (model["goal_id"],))
 
         return _json({
             "model_id": model_id,
@@ -150,6 +153,9 @@ class BatchAPI:
             "correct": correct,
             "accuracy": round(accuracy, 4),
             "confusion_matrix": confusion,
+            "max_score": max_score,
+            "threshold": threshold,
+            "score_definitions": score_cfg["score_definitions"],
             "binary": {
                 "tp": tp, "fp": fp, "fn": fn, "tn": tn,
                 "accuracy": round(binary_acc, 4),
@@ -182,6 +188,10 @@ class BatchAPI:
         if not os.path.isdir(model_dir):
             raise ValueError(f"模型目录不存在: {model_dir}")
 
+        # 获取分数配置
+        score_cfg = get_goal_score_config(model["goal_id"])
+        threshold = score_cfg["threshold"]
+
         # 加载已标注数据
         rows = db.query_all("""
             SELECT cm.id, cm.comment, cm.score, ct.text AS content_text
@@ -210,7 +220,7 @@ class BatchAPI:
                 true_score = row["score"]
                 pred_score = pred["score"]
                 is_correct = (true_score == pred_score)
-                pred_label = "has_intent" if pred_score >= SCORE_THRESHOLD else "no_intent"
+                pred_label = "has_intent" if pred_score >= threshold else "no_intent"
                 conn.execute("""
                     INSERT INTO batch_results (model_id, comment_id, predicted_score,
                                                predicted_label, confidence, is_correct)

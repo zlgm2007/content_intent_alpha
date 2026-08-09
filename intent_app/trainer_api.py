@@ -16,7 +16,7 @@ import json
 import os
 
 import db
-from common import MODELS_DIR, REPO_DIR
+from common import MODELS_DIR, REPO_DIR, get_goal_score_config
 from trainer_engine import TrainerEngine
 
 _engine = TrainerEngine()
@@ -86,8 +86,11 @@ class TrainerAPI:
                 WHERE goal_id = ? AND status = 'labeled' GROUP BY score
             ) GROUP BY score ORDER BY score
         """, (goal_id, goal_id))
-        has_intent = sum(r["count"] for r in score_dist if r["score"] >= 3)
-        no_intent = sum(r["count"] for r in score_dist if r["score"] < 3)
+        # 动态阈值
+        score_cfg = get_goal_score_config(goal_id)
+        threshold = score_cfg["threshold"]
+        has_intent = sum(r["count"] for r in score_dist if r["score"] >= threshold)
+        no_intent = sum(r["count"] for r in score_dist if r["score"] < threshold)
         # ES 原始得分可作伪标签的条数（只读训练用）
         raw_available = db.query_one(
             "SELECT COUNT(*) AS n FROM annotations "
@@ -103,6 +106,10 @@ class TrainerAPI:
             "ready": labeled >= 20,
             "raw_available": raw_available,
             "ready_raw": raw_available >= 20,
+            "max_score": score_cfg["max_score"],
+            "num_labels": score_cfg["num_labels"],
+            "threshold": threshold,
+            "score_definitions": score_cfg["score_definitions"],
         })
 
     # ---- POST ----

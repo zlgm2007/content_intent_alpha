@@ -48,16 +48,10 @@
 <!-- 快速标注 -->
 <div id="tab-quickLabel" class="card hidden">
   <h3>快速标注 — 评论列表</h3>
-  <p style="font-size:12px; color:#656d76; margin-bottom:12px;">为每条评论选择 0-5 分，3 分以上为有意图，3 分以下为无意图。点击分数即保存。</p>
+  <p style="font-size:12px; color:#656d76; margin-bottom:12px;" id="quickLabelHint">为每条评论选择分数，点击分数即保存。</p>
   <div class="row" style="align-items:center; margin-bottom:10px; gap:4px;">
     <label style="font-size:12px; font-weight:600; margin-right:4px;">评分筛选:</label>
-    <label style="font-size:12px;"><input type="checkbox" value="none" checked onchange="onQuickFilter()"> 未标注</label>
-    <label style="font-size:12px;"><input type="checkbox" value="0" onchange="onQuickFilter()"> 0</label>
-    <label style="font-size:12px;"><input type="checkbox" value="1" onchange="onQuickFilter()"> 1</label>
-    <label style="font-size:12px;"><input type="checkbox" value="2" onchange="onQuickFilter()"> 2</label>
-    <label style="font-size:12px;"><input type="checkbox" value="3" onchange="onQuickFilter()"> 3</label>
-    <label style="font-size:12px;"><input type="checkbox" value="4" onchange="onQuickFilter()"> 4</label>
-    <label style="font-size:12px;"><input type="checkbox" value="5" onchange="onQuickFilter()"> 5</label>
+    <div id="scoreFilterBox" style="display:flex; gap:8px; flex-wrap:wrap;"></div>
   </div>
   <div id="unlabeledList"><div class="empty">请先选择意图目标</div></div>
   <div id="unlabeledPager" class="pager"></div>

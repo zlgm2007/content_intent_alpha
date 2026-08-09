@@ -21,19 +21,20 @@
 import json
 
 import db
+from common import get_goal_score_config
 
 
 def _json(obj):
     return obj, None
 
-# 0-2 分 → no_intent, 3-5 分 → has_intent
-SCORE_THRESHOLD = 3
 
-
-def _score_to_label(score):
+def _score_to_label(score, goal_id=None):
     if score is None:
         return None
-    return "has_intent" if score >= SCORE_THRESHOLD else "no_intent"
+    threshold = 3
+    if goal_id:
+        threshold = get_goal_score_config(goal_id)["threshold"]
+    return "has_intent" if score >= threshold else "no_intent"
 
 
 def _score_where(sel_none, sel_scores):
@@ -276,9 +277,15 @@ class LabelerAPI:
         score = int(body.get("score", -1))
         if comment_id <= 0:
             raise ValueError("缺少评论 id")
-        if score < 0 or score > 5:
-            raise ValueError("分数必须为 0-5")
-        label = _score_to_label(score)
+        # 动态获取该评论所属目标的分数范围
+        comment = db.query_one("SELECT goal_id FROM comments WHERE id = ?", (comment_id,))
+        if not comment:
+            raise ValueError("评论不存在")
+        score_cfg = get_goal_score_config(comment["goal_id"])
+        max_score = score_cfg["max_score"]
+        if score < 0 or score > max_score:
+            raise ValueError(f"分数必须为 0-{max_score}")
+        label = _score_to_label(score, comment["goal_id"])
         db.execute(
             "UPDATE comments SET score = ?, label = ?, status = 'labeled' WHERE id = ?",
             (score, label, comment_id))
@@ -326,6 +333,10 @@ class LabelerAPI:
         if not items or not isinstance(items, list):
             raise ValueError("items 必须为非空列表")
 
+        # 动态获取分数范围
+        score_cfg = get_goal_score_config(goal_id)
+        max_score = score_cfg["max_score"]
+
         content_count = 0
         comment_count = 0
         conn = db.get_conn()
@@ -346,13 +357,13 @@ class LabelerAPI:
                     score = c.get("score")
                     if score is not None:
                         score = int(score)
-                        if score < 0 or score > 5:
+                        if score < 0 or score > max_score:
                             score = None
                     if score is not None:
                         conn.execute(
                             "INSERT INTO comments (goal_id, content_id, comment, score, label, status) "
                             "VALUES (?, ?, ?, ?, ?, 'labeled')",
-                            (goal_id, content_id, comment_text, score, _score_to_label(score)))
+                            (goal_id, content_id, comment_text, score, _score_to_label(score, goal_id)))
                     else:
                         conn.execute(
                             "INSERT INTO comments (goal_id, content_id, comment) VALUES (?, ?, ?)",

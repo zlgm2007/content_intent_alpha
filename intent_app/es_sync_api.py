@@ -20,11 +20,10 @@
 import json
 
 import db
-from common import ES_DEFAULT_DAYS, ES_INDICES
+from common import ES_DEFAULT_DAYS, ES_INDICES, get_goal_score_config
 from es_sync_engine import EsSyncEngine, es_test_connection
 
 _engine = EsSyncEngine()
-SCORE_THRESHOLD = 3
 
 
 def _json(obj):
@@ -187,9 +186,15 @@ class SyncAPI:
         score = int(body.get("score", -1))
         if ann_id <= 0:
             raise ValueError("缺少评论 id")
-        if score < 0 or score > 5:
-            raise ValueError("分数必须为 0-5")
-        label = "has_intent" if score >= SCORE_THRESHOLD else "no_intent"
+        ann = db.query_one("SELECT goal_id FROM annotations WHERE id = ?", (ann_id,))
+        if not ann:
+            raise ValueError("评论不存在")
+        score_cfg = get_goal_score_config(ann["goal_id"])
+        max_score = score_cfg["max_score"]
+        threshold = score_cfg["threshold"]
+        if score < 0 or score > max_score:
+            raise ValueError(f"分数必须为 0-{max_score}")
+        label = "has_intent" if score >= threshold else "no_intent"
         db.execute(
             "UPDATE annotations SET score = ?, label = ?, status = 'labeled' "
             "WHERE id = ?", (score, label, ann_id))

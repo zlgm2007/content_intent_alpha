@@ -51,9 +51,9 @@ class IntentInferencer:
 
         Returns:
             dict: {
-                "score": int (0-5),
+                "score": int (0~max_score, 由模型分类数决定),
                 "confidence": float,
-                "probabilities": list[float] (6个值)
+                "probabilities": list[float] (长度=num_labels)
             }
         """
         self._ensure_loaded()
@@ -74,7 +74,7 @@ class IntentInferencer:
                 feed[name] = encoding["token_type_ids"]
 
         outputs = self._session.run(None, feed)
-        logits = outputs[0]  # shape: (1, 6)
+        logits = outputs[0]  # shape: (1, num_labels)
 
         # softmax
         logits = logits[0].astype(np.float64)
@@ -122,7 +122,7 @@ class IntentInferencer:
                     feed[name] = encoding[name]
 
             outputs = self._session.run(None, feed)
-            logits = outputs[0].astype(np.float64)  # (batch, 6)
+            logits = outputs[0].astype(np.float64)  # (batch, num_labels)
 
             for row in logits:
                 exp = np.exp(row - np.max(row))

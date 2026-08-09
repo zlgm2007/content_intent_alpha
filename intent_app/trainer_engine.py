@@ -12,7 +12,7 @@ import time
 from collections import deque
 from datetime import datetime
 
-from common import MODELS_DIR, NUM_LABELS, PRETRAINED_MODEL
+from common import MODELS_DIR, PRETRAINED_MODEL, get_goal_score_config
 
 
 class TrainerEngine:
@@ -130,6 +130,13 @@ class TrainerEngine:
         val_ratio = float(hyperparams.get("val_ratio", 0.2))
 
         try:
+            # ---- 0. 获取意图目标的分数配置 ----
+            score_cfg = get_goal_score_config(goal_id)
+            num_labels = score_cfg["num_labels"]
+            max_score = score_cfg["max_score"]
+            threshold = score_cfg["threshold"]
+            self._log(f"分数配置: 0-{max_score}分 ({num_labels}分类), 阈值={threshold}")
+
             # ---- 1. 加载标注数据 ----
             # label_source='raw'：只读 ES 原始得分 raw_score 作伪标签，不改数据
             if label_source == "raw":
@@ -190,7 +197,7 @@ class TrainerEngine:
             self._log(f"正在加载预训练模型: {PRETRAINED_MODEL}...")
             tokenizer = AutoTokenizer.from_pretrained(PRETRAINED_MODEL)
             model = AutoModelForSequenceClassification.from_pretrained(
-                PRETRAINED_MODEL, num_labels=NUM_LABELS)
+                PRETRAINED_MODEL, num_labels=num_labels)
 
             # ---- 4. 创建 Dataset + DataLoader ----
             train_ds = _IntentDataset(train_data, tokenizer, max_length)
@@ -320,7 +327,7 @@ class TrainerEngine:
                 model.eval()
                 model_dir = self._export_onnx(
                     model, tokenizer, goal_id, goal_name,
-                    best_val_acc, hyperparams)
+                    best_val_acc, hyperparams, score_cfg)
                 self.last_model_dir = model_dir
                 self._log(f"ONNX 模型已保存: {model_dir}")
 
@@ -337,6 +344,10 @@ class TrainerEngine:
                     "val_ratio": val_ratio,
                     "pretrained_model": PRETRAINED_MODEL,
                     "label_source": label_source,
+                    "num_labels": num_labels,
+                    "max_score": max_score,
+                    "threshold": threshold,
+                    "score_definitions": score_cfg["score_definitions"],
                 }, ensure_ascii=False)
                 # 可读命名：{来源}_{epochs}ep_acc_{acc 4位小数}，来源 raw=ES原始得分 / manual=人工标注
                 src = "manual" if label_source == "labeled" else "raw"
@@ -381,7 +392,7 @@ class TrainerEngine:
         model.train()
         return correct / max(1, total)
 
-    def _export_onnx(self, model, tokenizer, goal_id, goal_name, acc, hyperparams):
+    def _export_onnx(self, model, tokenizer, goal_id, goal_name, acc, hyperparams, score_cfg=None):
         """导出 ONNX 模型 + INT8 量化。"""
         import torch
 
@@ -428,12 +439,16 @@ class TrainerEngine:
                 import shutil; shutil.copy2(onnx_path, int8_path)
 
         # 保存训练配置
+        sc = score_cfg or {}
         config = {
             "goal_id": goal_id,
             "goal_name": goal_name,
             "accuracy": acc,
             "pretrained_model": PRETRAINED_MODEL,
-            "num_labels": NUM_LABELS,
+            "num_labels": sc.get("num_labels", 6),
+            "max_score": sc.get("max_score", 5),
+            "threshold": sc.get("threshold", 3),
+            "score_definitions": sc.get("score_definitions"),
             "hyperparams": hyperparams,
             "exported_at": timestamp,
         }

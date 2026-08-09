@@ -167,6 +167,9 @@
 let currentGoalId = null;
 let pollTimer = null;
 let _trainStats = null;
+let goalMaxScore = 5;
+let goalThreshold = 3;
+let goalScoreDefs = null;
 
 async function api(path, opts={}) {
   const res = await fetch(path, { headers: {'Content-Type':'application/json'}, ...opts });
@@ -211,8 +214,16 @@ async function loadDataStats() {
   document.getElementById('dsHasIntent').textContent = data.has_intent;
   document.getElementById('dsNoIntent').textContent = data.no_intent;
   const dist = data.score_distribution || {};
+  // 更新分数配置
+  if (data.max_score != null) goalMaxScore = data.max_score;
+  if (data.threshold != null) goalThreshold = data.threshold;
+  goalScoreDefs = data.score_definitions || null;
+  function tScoreLabel(s) {
+    if (goalScoreDefs) { const d = goalScoreDefs.find(x => x.score === s); if (d) return `${s} ${d.label}`; }
+    return `${s}分`;
+  }
   document.getElementById('dsDist').innerHTML = Object.entries(dist).map(([s,c]) =>
-    `<span class="stat ${parseInt(s)>=3?'green':'gray'}">${s}分: ${c}</span>`
+    `<span class="stat ${parseInt(s)>=goalThreshold?'green':'gray'}">${tScoreLabel(parseInt(s))}: ${c}</span>`
   ).join(' ');
   _trainStats = data;
   updateTrainReady();
@@ -438,13 +449,17 @@ async function doPredict() {
   const el = document.getElementById('predictResult');
   if (data.error) { el.innerHTML = `<span class="stat red">${esc(data.error)}</span>`; return; }
   const r = data.result;
-  const label = r.score >= 3 ? '有意图' : '无意图';
-  const labelColor = r.score >= 3 ? 'green' : 'gray';
+  const label = r.score >= goalThreshold ? '有意图' : '无意图';
+  const labelColor = r.score >= goalThreshold ? 'green' : 'gray';
+  function pScoreLabel(i) {
+    if (goalScoreDefs) { const d = goalScoreDefs.find(x => x.score === i); if (d) return `${i} ${d.label}`; }
+    return `${i}分`;
+  }
   let probBars = r.probabilities.map((p, i) => {
     const w = p * 100;
-    const c = i >= 3 ? '#1a7f37' : '#656d76';
+    const c = i >= goalThreshold ? '#1a7f37' : '#656d76';
     return `<div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
-      <span style="width:30px; font-size:12px;">${i}分</span>
+      <span style="width:60px; font-size:12px;">${pScoreLabel(i)}</span>
       <div style="flex:1; height:20px; background:#eaeef2; border-radius:4px; overflow:hidden;">
         <div style="width:${w}%; height:100%; background:${c}; transition:width .3s;"></div>
       </div>

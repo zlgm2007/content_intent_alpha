@@ -4,6 +4,10 @@ let contentPage = 1;
 let unlabeledPage = 1;
 let pollTimer = null;
 let autoPollTimer = null;
+// 分数配置（从意图目标加载）
+let goalMaxScore = 5;
+let goalThreshold = 3;
+let goalScoreDefs = null;
 
 async function api(path, opts={}) {
   const res = await fetch(path, { headers: {'Content-Type':'application/json'}, ...opts });
@@ -31,12 +35,74 @@ function onGoalChange() {
   contentPage = 1;
   unlabeledPage = 1;
   syncAnnPage = 1;
-  loadStats();
-  loadContents();
-  loadUnlabeled();
-  loadSyncHistory();
-  loadSyncedAnnotations();
-  loadAutoLabelModels();
+  loadGoalConfig().then(() => {
+    loadStats();
+    loadContents();
+    loadUnlabeled();
+    loadSyncHistory();
+    loadSyncedAnnotations();
+    loadAutoLabelModels();
+  });
+}
+
+// ---- 加载意图目标的分数配置 ----
+async function loadGoalConfig() {
+  const data = await api(`/intent/api/detail?id=${currentGoalId}`);
+  if (data.error) return;
+  const defs = data.score_definitions;
+  if (defs && Array.isArray(defs) && defs.length >= 2) {
+    goalMaxScore = Math.max(...defs.map(d => d.score));
+    goalScoreDefs = defs;
+  } else {
+    goalMaxScore = 5;
+    goalScoreDefs = null;
+  }
+  goalThreshold = data.intent_threshold != null ? data.intent_threshold : Math.ceil((goalMaxScore + 1) / 2);
+  renderScoreFilter();
+  // 更新提示文字
+  const hint = document.getElementById('quickLabelHint');
+  if (hint) {
+    hint.textContent = `为每条评论选择 0-${goalMaxScore} 分，${goalThreshold} 分以上为有意图，点击分数即保存。`;
+  }
+}
+
+// ---- 分数按钮 HTML 生成 ----
+function scoreButtonsHtml(commentId, currentScore, onclickFmt) {
+  let html = '';
+  for (let s = 0; s <= goalMaxScore; s++) {
+    const cls = s >= goalThreshold ? 's-high' : 's-low';
+    const active = currentScore === s ? ' active' : '';
+    const onclick = onclickFmt.replace('{id}', commentId).replace('{score}', s);
+    html += `<button class="score-btn ${cls}${active}" onclick="${onclick}" title="${getScoreDesc(s)}">${getScoreLabel(s)}</button>`;
+  }
+  return html;
+}
+
+function getScoreLabel(score) {
+  if (goalScoreDefs) {
+    const d = goalScoreDefs.find(x => x.score === score);
+    if (d) return `${score} ${d.label}`;
+  }
+  return String(score);
+}
+
+function getScoreDesc(score) {
+  if (goalScoreDefs) {
+    const d = goalScoreDefs.find(x => x.score === score);
+    if (d && d.desc) return d.desc;
+  }
+  return `${score} 分`;
+}
+
+// ---- 评分筛选（动态） ----
+function renderScoreFilter() {
+  const box = document.getElementById('scoreFilterBox');
+  if (!box) return;
+  let html = `<label style="font-size:12px;"><input type="checkbox" value="none" checked onchange="onQuickFilter()"> 未标注</label>`;
+  for (let s = 0; s <= goalMaxScore; s++) {
+    html += `<label style="font-size:12px;"><input type="checkbox" value="${s}" onchange="onQuickFilter()"> ${getScoreLabel(s)}</label>`;
+  }
+  box.innerHTML = html;
 }
 
 async function loadStats() {
@@ -45,7 +111,7 @@ async function loadStats() {
   const box = document.getElementById('statsBox');
   const dist = data.score_distribution || {};
   let distHtml = Object.entries(dist).map(([s,c]) =>
-    `<span class="stat ${parseInt(s)>=3?'green':'gray'}">${s}分:${c}</span>`
+    `<span class="stat ${parseInt(s)>=goalThreshold?'green':'gray'}">${getScoreLabel(parseInt(s))}:${c}</span>`
   ).join(' ');
   box.innerHTML = `
     <span class="stat blue">总评论 ${data.total}</span>
@@ -139,14 +205,9 @@ async function showDetail(contentId, source) {
     html += '<div class="empty">暂无评论</div>';
   } else {
     html += comments.map(cm => {
-      let scoreHtml = '';
-      for (let s = 0; s <= 5; s++) {
-        const cls = s >= 3 ? 's-high' : 's-low';
-        const active = cm.score === s ? 'active' : '';
-        scoreHtml += `<button class="score-btn ${cls} ${active}" onclick="labelComment(${cm.id}, ${s}, ${c.id})">${s}</button>`;
-      }
+      const scoreHtml = scoreButtonsHtml(cm.id, cm.score, `labelComment(${cm.id}, {score}, ${c.id})`);
       const labelBadge = cm.status === 'labeled'
-        ? `<span class="stat ${cm.score>=3?'green':'gray'}">${cm.score}分 / ${cm.label==='has_intent'?'有意图':'无意图'}</span>`
+        ? `<span class="stat ${cm.score>=goalThreshold?'green':'gray'}">${cm.score}分 / ${cm.score>=goalThreshold?'有意图':'无意图'}</span>`
         : `<span class="stat yellow">未标注</span>`;
       return `
         <div class="comment-item">
@@ -241,17 +302,12 @@ async function loadUnlabeled() {
     return;
   }
   el.innerHTML = data.items.map(cm => {
-    let scoreHtml = '';
-    for (let s = 0; s <= 5; s++) {
-      const cls = s >= 3 ? 's-high' : 's-low';
-      const cur = cm.score != null && cm.score === s ? ' active' : '';
-      scoreHtml += `<button class="score-btn ${cls}${cur}" onclick="quickLabel('${cm.source}', ${cm.id}, ${s})">${s}</button>`;
-    }
+    const scoreHtml = scoreButtonsHtml(cm.id, cm.score, `quickLabel('${cm.source}', ${cm.id}, {score})`);
     const srcBadge = cm.source === 'es'
       ? `<span class="stat blue">外部</span>`
       : `<span class="stat gray">手工</span>`;
     const rawBadge = cm.source === 'es' && cm.raw_score != null
-      ? `<span class="stat ${cm.raw_score>=3?'green':'gray'}">ES ${cm.raw_score}分</span>`
+      ? `<span class="stat ${cm.raw_score>=goalThreshold?'green':'gray'}">ES ${cm.raw_score}分</span>`
       : '';
     return `
       <div class="comment-item">

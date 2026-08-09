@@ -17,14 +17,16 @@ import time
 from collections import deque
 from datetime import datetime
 
-from common import REPO_DIR
+from common import REPO_DIR, get_goal_score_config
 
-SCORE_THRESHOLD = 3
 BATCH_SIZE = 32
 
 
-def _score_to_label(score):
-    return "has_intent" if score >= SCORE_THRESHOLD else "no_intent"
+def _score_to_label(score, goal_id=None):
+    threshold = 3
+    if goal_id:
+        threshold = get_goal_score_config(goal_id)["threshold"]
+    return "has_intent" if score >= threshold else "no_intent"
 
 
 class AutoLabelEngine:
@@ -223,12 +225,12 @@ class AutoLabelEngine:
                 conn.executemany(
                     "UPDATE comments SET score = ?, label = ?, status = 'labeled', "
                     "auto_labeled = 1 WHERE id = ? AND status = 'pending'",
-                    [(s, _score_to_label(s), i) for (_, i, s) in manual])
+                    [(s, _score_to_label(s, self.goal_id), i) for (_, i, s) in manual])
             if es:
                 conn.executemany(
                     "UPDATE annotations SET score = ?, label = ?, status = 'labeled', "
                     "auto_labeled = 1 WHERE id = ? AND status = 'pending'",
-                    [(s, _score_to_label(s), i) for (_, i, s) in es])
+                    [(s, _score_to_label(s, self.goal_id), i) for (_, i, s) in es])
             conn.commit()
         except Exception:
             conn.rollback()

@@ -124,17 +124,12 @@ async function loadSyncHistory() {
 
 // ---- 外部评论标注（供外部页签与作品详情弹窗复用） ----
 function annotationHtml(a) {
-  let scoreHtml = '';
-  for (let s = 0; s <= 5; s++) {
-    const cls = s >= 3 ? 's-high' : 's-low';
-    const active = a.score === s ? 'active' : '';
-    scoreHtml += `<button class="score-btn ${cls} ${active}" onclick="labelSynced(${a.id}, ${s})">${s}</button>`;
-  }
+  const scoreHtml = scoreButtonsHtml(a.id, a.score, `labelSynced(${a.id}, {score})`);
   const rawBadge = a.raw_score != null
-    ? `<span class="stat ${a.raw_score>=3?'green':'gray'}">ES ${a.raw_score}分</span>`
+    ? `<span class="stat ${a.raw_score>=goalThreshold?'green':'gray'}">ES ${a.raw_score}分</span>`
     : `<span class="stat gray">未打分</span>`;
   const labelBadge = a.status === 'labeled'
-    ? `<span class="stat ${a.score>=3?'green':'gray'}">标注 ${a.score}分</span>`
+    ? `<span class="stat ${a.score>=goalThreshold?'green':'gray'}">标注 ${a.score}分</span>`
     : a.status === 'skipped' ? `<span class="stat yellow">已跳过</span>`
     : `<span class="stat yellow">未标注</span>`;
   return `
