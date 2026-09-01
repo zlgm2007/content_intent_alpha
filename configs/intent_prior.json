@@ -1,0 +1,27 @@
+{
+  "bias": [
+    -0.482923,
+    -0.397277,
+    -0.486706,
+    0.530913,
+    -0.486706,
+    0.231475
+  ],
+  "train_prior": [
+    0.082354,
+    0.215276,
+    0.17672,
+    0.215276,
+    0.095098,
+    0.215276
+  ],
+  "real_prior": [
+    0.05081,
+    0.144697,
+    0.108621,
+    0.366073,
+    0.058452,
+    0.271346
+  ],
+  "note": "log(P_real/P_train)，由 scripts/tune_intent_prior.py 生成；配合 configs/intent.yaml 的 inference.prior_correction_alpha 使用"
+}
