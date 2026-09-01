@@ -1,0 +1,23 @@
+# 意图识别从es里数据初始化原始数据 10.104.214.120 内网地址
+
+es:
+  hosts:
+  - http://10.104.214.120:9200
+  indices:
+  - lead_clue_score_ge3
+  - lead_clue_score_lt3
+  fields:
+    text_comment: commentContent
+    text_desc: noteDesc
+    text_title: noteTitle
+    text_topics: noteTopics
+    intent_content: intentContent
+    intent_brand: intentBrand
+    intent_category: intentCategory
+    intent_product: intentProduct
+    intent_score: intentScore
+    update_time: updateTime
+  scroll_size: 1000
+  scroll_timeout: 2m
+  slices: 4
+  only_core: true

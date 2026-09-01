@@ -1,0 +1,49 @@
+# NER 实体识别训练/推理配置
+
+model:
+  pretrained: "voidful/albert_chinese_small"   # HuggingFace 预训练底座（中文 ALBERT 小模型）
+  max_length: 320                          # 正文+评论拼接后的序列长度（原 128 已不够）
+  # BIO 标签：O / B-BRAND / I-BRAND / B-CATEGORY / I-CATEGORY / B-PRODUCT / I-PRODUCT / B-MODEL / I-MODEL
+  labels:
+    - "O"
+    - "B-BRAND"
+    - "I-BRAND"
+    - "B-CATEGORY"
+    - "I-CATEGORY"
+    - "B-PRODUCT"
+    - "I-PRODUCT"
+    - "B-MODEL"
+    - "I-MODEL"
+
+data:
+  lexicon_dir: "data/ner/lexicon"          # 词典目录（brand/category/product/model.txt）
+  raw_dir: "data/ner/raw"                  # 原始语料目录（每行一条文本）
+  annotated_file: "data/ner/annotated/train.conll"   # 训练标注文件
+  entity_vocab_file: "data/ner/annotated/entity_vocab.json"  # 训练实体表缓存（单字实体白名单）
+  val_file: "data/ner/annotated/val.conll"           # 验证标注文件（可选）
+  train_split: 0.9                         # 无独立验证集时按比例切分
+
+train:
+  output_dir: "models/ner"
+  epochs: 3
+  batch_size: 32
+  learning_rate: 0.00002            # 2e-5（避免 yaml 把 2e-5 解析成字符串，用显式小数）
+  weight_decay: 0.01
+  warmup_ratio: 0.1
+  seed: 42
+
+export:
+  onnx_path: "models/ner/ner.onnx"
+  quantize: false                          # 是否做动态量化（int8）
+  opset: 14
+
+# 推理解码后处理：消除 "一"/"小"/"米11" 这类碎片实体
+# 详见 src/ner/postprocess.py（严格 BIO 分段 → 段内类型多数票 → 词典/规则过滤）
+inference:
+  lexicon_dir: "data/ner/lexicon"      # 词典校验目录（brand/category/product/model）
+  enable_lexicon_filter: true          # 未命中词典的单字 / 纯数字实体直接丢弃
+  isolated_i_threshold: 0.9            # 孤立 I- 标签（O 后直接接 I-）当作实体起点的概率门槛
+  min_confidence: 0.0                  # 实体平均置信度下限，0=不过滤
+                                       # （实测碎片 0.53 vs 正常 0.56 区分度低，开启易误杀，谨慎调整）
+  min_entity_len: 1                    # 实体最小字符数（去重空格后）
+  drop_numeric_only: true              # 丢弃未命中词典的纯数字/纯符号实体（如单独的 "11"）

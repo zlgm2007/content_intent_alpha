@@ -1,0 +1,38 @@
+# 词典屏蔽词表：被误当成实体的通用词 / 修饰词
+#
+# 背景：词典由 ES gold 的 brand/category/product 字段派生，而外部打标程序
+# 会把修饰词一起写进实体字段（例："国产手机" 被整体存进 brand 字段，
+# 于是 "国产" 就成了 BRAND）。模型学得很认真，于是「我们老板说这个方案可以」
+# 会把「老板」标成 BRAND、「新手教程来了」会把「教程」标成 CATEGORY。
+#
+# 为什么只能人工维护：自动识别实测不可行，两种统计量都失败——
+#   1. 左右邻接熵：高频实体天然邻接多样，把「空调/美的/海尔」也误判成通用词
+#   2. 按词频归一化：正确词与错误词数值完全重叠
+#      （美的 0.82 vs 国产 0.82、京东 1.14 vs 新品 1.14），不可分
+# 根因：本语料里所有词都出现在相似的商品讨论语境，分布信号区分不了
+#      「品牌」和「修饰品牌的形容词」。这依赖业务语义，只能人工判断。
+#
+# 用法：
+#   1. 每行一个词，# 开头为注释，空行忽略
+#   2. 改完需重建词典映射并重训，否则不生效：
+#        PYTHONPATH=. python -c "from src.web import data_prep_service as d; \
+#          m=d.build_dict_entity_map(); d.save_dict_entity_map(m); print(len(m))"
+#        PYTHONPATH=. python -c "from src.web import data_prep_service as d; \
+#          print(d.build_ner_data(limit=0, min_entities=1, max_per_pattern=5, \
+#          annotator='dict', holdout_ratio=0.1))"
+#        python scripts/finish_ner_pipeline.py --no-wait
+#
+# 候选来源：按出现频次排序的词典词已导出到
+#   data/ner/annotated/dict_review_top500.csv
+# 扫描前 300 行基本能覆盖绝大多数实体出现次数，把不要的加进来即可。
+#
+# ⚠️ 注意别误杀：宠物/家政/收纳/维修/手机/衣服/面料 这类看着普通，
+#    但在这个业务里是合法品类，不要加。
+# ---------------------------------------------------------------------------
+
+# —— 已被确认误标的（形容词 / 称谓 / 内容形式，不是实体）——
+国产          # 形容词，被误标为 BRAND。例："国产手机现在做得真不错"
+老板          # 称谓，被误标为 BRAND。例："我们老板说这个方案可以"
+教程          # 内容形式，被误标为 CATEGORY。例："新手教程来了，快收藏"
+新品          # 修饰词，被误标为 PRODUCT
+数码科技      # 过于宽泛的话题词，被误标为 CATEGORY
